@@ -1,0 +1,56 @@
+# Ambiente Virtual Python
+venv/
+env/
+ENV/
+.venv
+
+# Cache TensorRT (gerado localmente, específico da GPU)
+trt_cache/
+
+# Modelos ONNX (arquivos grandes, baixados separadamente)
+models/*.onnx
+models/*.pth
+models/*.pt
+
+# Imagens dentro da pasta images/ (dados privados)
+images/*
+# Mantém a pasta images/
+!images/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Jupyter Notebook
+*.ipynb_checkpoints
+*.ipynb
+
+# Arquivos de debug
+debug_*.txt
+debug_*.jpg
+debug_*.png
+*.log
+
+# Configurações IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sistema Operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Outputs temporários
+*.tmp
+*.temp
+output/
+results/
+
+# Informações de GPU (pode conter dados específicos do sistema)
+gpu_info.txt

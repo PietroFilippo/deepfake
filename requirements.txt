@@ -1,0 +1,6 @@
+numpy
+opencv-python
+insightface
+onnxruntime-gpu
+onnxconverter_common
+polygraphy
