@@ -95,14 +95,50 @@ scripts\run.bat images/minha_foto.jpg
 
 ### Opções
 ```bash
-python main.py --source <imagem> [--model <caminho_modelo>]
+python main.py --source <imagem> [opções]
 ```
 
+#### Argumentos Principais
 - `--source`: Imagem do rosto que será aplicado (obrigatório)
 - `--model`: Caminho para modelo inswapper (padrão: `models/inswapper_128_fp16.onnx`)
 
+#### Argumentos de Performance
+- `--max-workers`: Número de threads paralelas (Padrão: auto).
+  - Menor (2-3) = Menor latência (menos delay), FPS menor.
+  - Maior (5-6) = Maior FPS, maior latência (mais delay).
+- `--detect-interval`: Intervalo de quadros para detecção de rosto (Padrão: 5).
+  - Aumentar (ex: 10) reduz uso de CPU e pode aumentar FPS da GPU.
+- `--camera-fps`: Solicita FPS específico para a webcam (Padrão: 30).
+
 ### Controles
 - **q**: Sair da aplicação
+
+## Otimização de Performance
+
+Encontre o equilíbrio ideal para seu hardware:
+
+### 1. Modo Baixa Latência (Recomendado pra interação)
+Prioriza resposta instantânea. FPS será menor (~12-15), mas o vídeo "acompanha" seus movimentos.
+```bash
+python main.py --source images/c.jpg --max-workers 2
+```
+
+### 2. Modo Alto FPS (Recomendado pra gravação)
+Prioriza fluidez. FPS será maior (~25-30), mas haverá um pequeno atraso (delay).
+```bash
+python main.py --source images/c.jpg --max-workers 5 --camera-fps 60
+```
+
+### 3. Modo Equilibrado
+Um meio termo entre fluidez e resposta.
+```bash
+python main.py --source images/c.jpg --max-workers 3 --detect-interval 8
+```
+
+### 4. Modo que Funcionou Bem pra Mim
+```bash
+python main.py --source images/c.jpg --max-workers 4 --detect-interval 5
+```
 
 ## Scripts Utilitários
 
@@ -129,27 +165,6 @@ Converte modelos ONNX de FP32 para FP16 (~2x mais rápido).
 python tools/fix_trt_dlls.py
 ```
 Copia DLLs do TensorRT para ONNX Runtime (raramente necessário com auto-detecção).
-
-## Configuração Avançada
-
-### Ajustar número de workers
-Edite `src/swapper.py`, linha 89:
-```python
-self.max_workers = min(cpu_count, 5)  # Altere 5 para seu valor
-```
-
-### Ajustar resolução de detecção
-Edite `src/swapper.py`, linha 46:
-```python
-def __init__(self, model_path, providers=None, det_size=(320, 320)):
-```
-Valores menores = mais rápido, menos preciso.
-
-### Ajustar intervalo de detecção
-Edite `main.py`, linha 50:
-```python
-future = swapper.process_frame_async(frame)  # detect_interval padrão: 5
-```
 
 ## Troubleshooting
 
@@ -189,7 +204,7 @@ Execute `python tools/check_environment.py` para diagnóstico completo.
 
 ## Performance Esperada
 
-Com RTX 4060 Ti + TensorRT FP16:
+Testes feitos com RTX 4060 Ti + TensorRT FP16:
 - **Detecção**: ~15-20ms por frame (em 50% downscale)
 - **Swapping**: ~5-10ms por rosto
 - **FPS alvo**: 15-30 FPS (depende de número de rostos e configurações)
