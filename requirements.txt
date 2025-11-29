@@ -4,3 +4,4 @@ insightface
 onnxruntime-gpu
 onnxconverter_common
 polygraphy
+# tensorrt: Instale manualmente como mencionado no README.md (requer login NVIDIA)
