@@ -109,9 +109,23 @@ python main.py --source <imagem> [opções]
 - `--detect-interval`: Intervalo de quadros para detecção de rosto (Padrão: 5).
   - Aumentar (ex: 10) reduz uso de CPU e pode aumentar FPS da GPU.
 - `--camera-fps`: Solicita FPS específico para a webcam (Padrão: 30).
+- `--virtual-cam`: Ativa saída para OBS Virtual Camera (Útil para Discord, Zoom, etc).
 
 ### Controles
 - **q**: Sair da aplicação
+
+## Câmera Virtual (Discord/Zoom/Teams)
+
+Para usar o deepfake em chamadas de vídeo:
+
+1.  Certifique-se de ter o **OBS Studio** instalado (ele instala o driver da câmera virtual).
+2.  Execute com a flag `--virtual-cam`:
+    ```bash
+    python main.py --source images/face.jpg --max-workers 4 --detect-interval 5 --virtual-cam
+    ```
+3.  No Discord/Zoom/Teams, selecione **OBS Virtual Camera** como sua câmera.
+    
+> **Nota:** O script suporta 1080p (1920x1080). Se desejar alterar a resolução padrão, edite `src/camera.py` (linhas 12 e 13) e `main.py` (linha 42).
 
 ## Otimização de Performance
 
