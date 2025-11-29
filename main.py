@@ -3,6 +3,7 @@ import argparse
 import time
 import os
 import sys
+import numpy as np
 from src.camera import WebcamStream
 from src.swapper import FaceSwapper
 
@@ -13,6 +14,7 @@ def main():
     parser.add_argument("--max-workers", type=int, default=None, help="Número máximo de threads (workers). Menos = menos latência, Mais = mais FPS.")
     parser.add_argument("--detect-interval", type=int, default=5, help="Intervalo de quadros para detecção de rosto. Maior = mais FPS.")
     parser.add_argument("--camera-fps", type=int, default=30, help="FPS desejado para a webcam.")
+    parser.add_argument("--virtual-cam", action="store_true", help="Ativa saída para câmera virtual (OBS Virtual Camera).")
     args = parser.parse_args()
 
     if not os.path.exists(args.source):
@@ -29,6 +31,23 @@ def main():
 
     print(f"Iniciando webcam com {args.camera_fps} FPS solicitados.")
     webcam = WebcamStream(fps=args.camera_fps).start()
+
+    # Inicializa câmera virtual se solicitado
+    vcam = None
+    if args.virtual_cam:
+        try:
+            import pyvirtualcam
+            # Tenta inicializar com resolução padrão
+            # é usado o valor que foi definido na WebcamStream.
+            vcam = pyvirtualcam.Camera(width=1920, height=1080, fps=args.camera_fps, fmt=pyvirtualcam.PixelFormat.BGR)
+            print(f"[VirtualCam] Câmera virtual iniciada: {vcam.device}")
+        except ImportError:
+            print("Erro: 'pyvirtualcam' não instalado. Execute: pip install pyvirtualcam")
+            sys.exit(1)
+        except Exception as e:
+            print(f"Erro ao iniciar câmera virtual: {e}")
+            print("Certifique-se que o OBS Studio está instalado (ou outro driver de câmera virtual).")
+            vcam = None
 
     print("Pressione 'q' para sair.")
     fps_start_time = time.time()
@@ -71,6 +90,20 @@ def main():
             # Continua enchendo o buffer pelos primeiros quadros
             continue
 
+        # Envia para câmera virtual
+        if vcam:
+            try:
+                # Garante que o tamanho do frame corresponde ao esperado pela câmera virtual
+                if output.shape[1] != vcam.width or output.shape[0] != vcam.height:
+                    output_vcam = cv2.resize(output, (vcam.width, vcam.height))
+                    vcam.send(output_vcam)
+                else:
+                    vcam.send(output)
+                    
+                vcam.sleep_until_next_frame()
+            except Exception as e:
+                print(f"Erro na câmera virtual: {e}")
+
         # Cálculo de FPS
         fps_frame_count += 1
         if time.time() - fps_start_time > 1.0:
@@ -85,6 +118,8 @@ def main():
             break
             
     webcam.stop()
+    if vcam:
+        vcam.close()
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":

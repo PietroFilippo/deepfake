@@ -8,9 +8,9 @@ class WebcamStream:
         self.stream = cv2.VideoCapture(src, cv2.CAP_DSHOW) 
         (self.grabbed, self.frame) = self.stream.read() 
         self.stopped = False 
-        # Define resolução mais alta se possível, pode ser ajustado 
-        self.stream.set(cv2.CAP_PROP_FRAME_WIDTH, 640) 
-        self.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, 480) 
+        # Define resolução, pode ser ajustado 
+        self.stream.set(cv2.CAP_PROP_FRAME_WIDTH, 1920) 
+        self.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080) 
         self.stream.set(cv2.CAP_PROP_FPS, fps)
     def start(self): 
         Thread(target=self.update, args=()).start() 
