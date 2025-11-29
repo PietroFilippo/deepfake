@@ -43,7 +43,7 @@ if os.name == 'nt':
         print(f"Aviso: Falha ao adicionar diretórios DLL: {e}")
 
 class FaceSwapper:
-    def __init__(self, model_path, providers=None, det_size=(320, 320)):
+    def __init__(self, model_path, providers=None, det_size=(320, 320), max_workers=None):
         if providers is None:
             # Prioriza TensorRT, depois CUDA, depois CPU
             providers = [
@@ -85,8 +85,11 @@ class FaceSwapper:
         # Usa até 5 workers para balancear FPS (paralelismo) vs Latência (tamanho do buffer)
         # Mais workers = FPS maior mas mais atraso. 5 é um ponto bom (~200ms de atraso).
         import concurrent.futures
-        cpu_count = os.cpu_count() or 4
-        self.max_workers = min(cpu_count, 5)
+        if max_workers is None:
+            cpu_count = os.cpu_count() or 4
+            self.max_workers = min(cpu_count, 5)
+        else:
+            self.max_workers = max_workers
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
         print(f"[FaceSwapper] Inicializado com {self.max_workers} threads de trabalho.")
 

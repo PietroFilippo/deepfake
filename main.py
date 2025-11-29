@@ -10,24 +10,27 @@ def main():
     parser = argparse.ArgumentParser(description="Deepfake em Tempo Real")
     parser.add_argument("--source", help="Caminho para imagem de origem", required=True)
     parser.add_argument("--model", help="Caminho para modelo inswapper", default="models/inswapper_128_fp16.onnx")
+    parser.add_argument("--max-workers", type=int, default=None, help="Número máximo de threads (workers). Menos = menos latência, Mais = mais FPS.")
+    parser.add_argument("--detect-interval", type=int, default=5, help="Intervalo de quadros para detecção de rosto. Maior = mais FPS.")
+    parser.add_argument("--camera-fps", type=int, default=30, help="FPS desejado para a webcam.")
     args = parser.parse_args()
 
     if not os.path.exists(args.source):
         print(f"Erro: Imagem de origem não encontrada em {args.source}")
         sys.exit(1)
 
-    print("Inicializando...")
+    print("Inicializando.")
     try:
-        swapper = FaceSwapper(args.model)
+        swapper = FaceSwapper(args.model, max_workers=args.max_workers)
         swapper.set_source_image(args.source)
     except Exception as e:
         print(f"Erro ao inicializar swapper: {e}")
         sys.exit(1)
 
-    print("Iniciando webcam")
-    webcam = WebcamStream().start()
+    print(f"Iniciando webcam com {args.camera_fps} FPS solicitados.")
+    webcam = WebcamStream(fps=args.camera_fps).start()
 
-    print("Pressione 'q' para sair")
+    print("Pressione 'q' para sair.")
     fps_start_time = time.time()
     fps_frame_count = 0
     fps = 0
@@ -35,7 +38,7 @@ def main():
     from collections import deque
     # Buffer para armazenar futures pendentes. 
     # Tamanho = workers + 1 minimiza latência enquanto mantém workers ocupados.
-    # Acessa swapper.max_workers que adicionamos ao swapper.py
+    # Acessa swapper.max_workers que foi adicionado ao swapper.py
     buffer_size = getattr(swapper, 'max_workers', 4) + 1
     pending_futures = deque(maxlen=buffer_size)
     print(f"[Main] Tamanho do buffer de quadros: {buffer_size}")
@@ -47,7 +50,7 @@ def main():
             
         # 1. Envia quadro para o pool de workers
         try:
-            future = swapper.process_frame_async(frame)
+            future = swapper.process_frame_async(frame, detect_interval=args.detect_interval)
             pending_futures.append(future)
         except Exception as e:
             print(f"Erro de envio: {e}")
