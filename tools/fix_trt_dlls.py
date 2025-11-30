@@ -3,21 +3,13 @@ import shutil
 import glob
 import sys
 
-# Detecta caminho do TensorRT
-trt_lib_path = None
-if 'TENSORRT_DIR' in os.environ:
-    trt_lib_path = os.path.join(os.environ['TENSORRT_DIR'], 'lib')
-else:
-    # Procura TensorRT em caminhos comuns (Windows, pode ser modificado)
-    common_paths = [
-        r"C:\Program Files\TensorRT-10.4.0.26\TensorRT-10.4.0.26\lib",
-        r"C:\Program Files\NVIDIA GPU Computing Toolkit\TensorRT\lib",
-        r"C:\TensorRT\lib",
-    ]
-    for path in common_paths:
-        if os.path.exists(path):
-            trt_lib_path = path
-            break
+# Adiciona raiz do projeto ao caminho para importar de src
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.utils import find_tensorrt_lib_path
+
+# Detecta caminho do TensorRT usando utilitário compartilhado
+trt_lib_path = find_tensorrt_lib_path()
+
 
 if not trt_lib_path or not os.path.exists(trt_lib_path):
     print("Erro: TensorRT não encontrado. Configure TENSORRT_DIR ou instale em local padrão.")

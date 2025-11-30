@@ -2,6 +2,10 @@ import os
 import sys
 import ctypes
 
+# Adiciona raiz do projeto ao caminho para importar de src
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.utils import find_tensorrt_lib_path
+
 def print_section(title):
     # Imprime um título de seção formatado
     print(f"\n{'='*60}")
@@ -84,20 +88,8 @@ def check_tensorrt_dlls():
     # Verifica DLLs do TensorRT
     print_section("BIBLIOTECAS TENSORRT")
     
-    # Auto-detecção do TensorRT
-    trt_lib_path = None
-    if 'TENSORRT_DIR' in os.environ:
-        trt_lib_path = os.path.join(os.environ['TENSORRT_DIR'], 'lib')
-    else:
-        common_paths = [
-            r"C:\Program Files\TensorRT-10.4.0.26\TensorRT-10.4.0.26\lib",
-            r"C:\Program Files\NVIDIA GPU Computing Toolkit\TensorRT\lib",
-            r"C:\TensorRT\lib",
-        ]
-        for path in common_paths:
-            if os.path.exists(path):
-                trt_lib_path = path
-                break
+    # Usa utilitário compartilhado para encontrar caminho do TensorRT
+    trt_lib_path = find_tensorrt_lib_path()
     
     if not trt_lib_path:
         print("TensorRT não encontrado em locais padrão ou TENSORRT_DIR")

@@ -3,61 +3,15 @@ import insightface
 import numpy as np
 import os
 import time
+from .utils import setup_dll_directories, get_default_providers
 
-# Adiciona explicitamente diretórios DLL para Windows (Python 3.8+)
-if os.name == 'nt':
-    try:
-        # Adiciona onnxruntime/capi
-        ort_capi = os.path.join(os.path.dirname(os.path.dirname(insightface.__file__)), 'onnxruntime', 'capi')
-        if os.path.exists(ort_capi):
-            os.add_dll_directory(ort_capi)
-        
-        # Adiciona o caminho original da lib do TensorRT
-        # Detecta automaticamente ou usa variável de ambiente TENSORRT_DIR
-        trt_lib = None
-        if 'TENSORRT_DIR' in os.environ:
-            trt_lib = os.path.join(os.environ['TENSORRT_DIR'], 'lib')
-        else:
-            # Tenta localizar TensorRT (10.4.0.26) em caminhos comuns (Windows, pode ser modificado)
-            common_paths = [
-                r"C:\Program Files\TensorRT-10.4.0.26\TensorRT-10.4.0.26\lib",
-                r"C:\Program Files\NVIDIA GPU Computing Toolkit\TensorRT\lib",
-                r"C:\TensorRT\lib",
-            ]
-            for path in common_paths:
-                if os.path.exists(path):
-                    trt_lib = path
-                    break
-        
-        if trt_lib and os.path.exists(trt_lib):
-            os.add_dll_directory(trt_lib)
-
-        # Adiciona torch/lib (para zlibwapi)
-        import torch
-        torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
-        if os.path.exists(torch_lib):
-            os.add_dll_directory(torch_lib)
-            
-        print("Diretórios DLL adicionados ao caminho de busca.")
-    except Exception as e:
-        print(f"Aviso: Falha ao adicionar diretórios DLL: {e}")
+# Setup DLL directories for Windows
+setup_dll_directories()
 
 class FaceSwapper:
     def __init__(self, model_path, providers=None, det_size=(320, 320), max_workers=None):
         if providers is None:
-            # Prioriza TensorRT, depois CUDA, depois CPU
-            providers = [
-                ('TensorrtExecutionProvider', {
-                    'trt_engine_cache_enable': True,
-                    'trt_engine_cache_path': 'trt_cache',
-                    'trt_fp16_enable': True,
-                }),
-                ('CUDAExecutionProvider', {
-                    'cudnn_conv_algo_search': 'HEURISTIC',
-                    'arena_extend_strategy': 'kSameAsRequested',
-                }),
-                'CPUExecutionProvider'
-            ]
+            providers = get_default_providers()
         self.providers = providers
         self.det_size = det_size
 
@@ -129,6 +83,7 @@ class FaceSwapper:
     def process_frame_async(self, frame, detect_interval=5):
         if self.source_face is None:
             # Retorna um future completo com o quadro original
+            import concurrent.futures
             future = concurrent.futures.Future()
             future.set_result(frame)
             return future
