@@ -113,6 +113,9 @@ python main.py --source <imagem> [opções]
 
 ### Controles
 - **q**: Sair da aplicação
+- **n**: Trocar para próxima imagem da pasta `images/`
+- **p**: Trocar para imagem anterior da pasta `images/`
+- **x**: Ativar/Desativar troca de rosto (mostra webcam original)
 
 ## Câmera Virtual (Discord/Zoom/Teams)
 
