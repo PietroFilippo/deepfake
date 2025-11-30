@@ -66,7 +66,8 @@ Você deve ver: **AMBIENTE CONFIGURADO CORRETAMENTE**
 deepfake/
 ├── src/                  # Módulos principais
 │   ├── camera.py          # Captura de webcam com threading
-│   └── swapper.py         # Face detection e swapping
+│   ├── swapper.py         # Face detection e swapping
+│   └── utils.py           # Utilitários compartilhados (DLL setup, providers)
 ├── tools/                # Utilitários Python
 │   ├── check_environment.py   # Diagnóstico completo
 │   ├── benchmark_model.py     # Benchmark de inferência
