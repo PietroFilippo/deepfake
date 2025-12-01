@@ -121,11 +121,12 @@ python main.py --source <imagem> [opções]
 
 ## "Melhoria" de Rosto (Face Enhancer)
 
-O projeto suporta melhoria de rosto usando o modelo **GFPGAN** para corrigir rostos borrados em resoluções maiores. Isso aumenta a resolução, mas deixa os rostos mais "plásticos".
+O projeto suporta melhoria de rosto usando o modelo **GFPGAN** para corrigir rostos borrados em resoluções maiores. Isso aumenta a resolução, mas deixa os rostos mais "plásticos" (Qualidade bem pior no escuro se comparado ao inswapper_128).
 
-- **Modelo**: `models/GFPGANv1.4.onnx`(Baixado externamente igual os outros modelos)
+- **Modelo**: `models/GFPGANv1.4.onnx` (Baixado externamente igual os outros modelos)
 - **Ativação**: Pressione a tecla `e` durante a execução.
-- **Performance**: Esse enhancer roda em **FP32** (Full Precision) no TensorRT para evitar artefatos visuais. Isso consome mais recursos que o swapper (FP16), então espere uma queda de FPS quando ativado. 
+- **Performance**: Esse enhancer roda em **FP32** (Full Precision) no TensorRT para evitar artefatos visuais. Isso consome mais recursos que o swapper (FP16), então espere uma queda de FPS quando ativado.
+
 ## Câmera Virtual (Discord/Zoom/Teams)
 
 Para usar o deepfake em chamadas de vídeo:
