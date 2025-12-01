@@ -85,6 +85,7 @@ def main():
     print("  'n': Próxima imagem")
     print("  'p': Imagem anterior")
     print("  'x': Ativar/Desativar troca")
+    print("  'e': Ativar/Desativar melhoria de rosto (GFPGAN)")
     
     fps_start_time = time.time()
     fps_frame_count = 0
@@ -155,7 +156,7 @@ def main():
             fps = fps_frame_count / (time.time() - fps_start_time)
             fps_frame_count = 0
             fps_start_time = time.time()
-        
+
         # UI Overlay
         cv2.putText(output, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(output, f"Img: {current_image_name}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
@@ -163,6 +164,12 @@ def main():
         status_color = (0, 255, 0) if swap_enabled else (0, 0, 255)
         status_text = "ON" if swap_enabled else "OFF"
         cv2.putText(output, f"Status: {status_text}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+
+        # Status do enhancer
+        enh_enabled = getattr(swapper, 'enhancement_enabled', False)
+        enh_color = (0, 255, 0) if enh_enabled else (0, 0, 255)
+        enh_text = "ON" if enh_enabled else "OFF"
+        cv2.putText(output, f"Enhance: {enh_text}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, enh_color, 2)
         
         cv2.imshow("Deepfake Real-time", output)
         
@@ -192,7 +199,13 @@ def main():
                 print(f"Erro ao trocar imagem: {e}")
         elif key == ord('x'):
             swap_enabled = not swap_enabled
-            print(f"Troca de rosto: {'Ativada' if swap_enabled else 'Desativada'}")
+            print(f"Troca de rosto: {'Ativado' if swap_enabled else 'Desativado'}")
+        elif key == ord('e'):
+            if hasattr(swapper, 'toggle_enhancer'):
+                is_enabled = swapper.toggle_enhancer()
+                print(f"Enhancer: {'Ativado' if is_enabled else 'Desativado'}")
+            else:
+                print("Enhancer não disponível.")
             
     webcam.stop()
     if vcam:

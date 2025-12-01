@@ -3,7 +3,9 @@ import insightface
 import numpy as np
 import os
 import time
+import concurrent.futures
 from .utils import setup_dll_directories, get_default_providers
+from .enhancer import FaceEnhancer
 
 # Setup DLL directories for Windows
 setup_dll_directories()
@@ -29,6 +31,16 @@ class FaceSwapper:
             os.makedirs('trt_cache')
             
         self.swapper = insightface.model_zoo.get_model(model_path, providers=self.providers)
+        
+        # Inicializa Enhancer (GFPGAN)
+        try:
+            self.enhancer = FaceEnhancer()
+            self.enhancement_enabled = False # Desativado por padrão
+        except Exception as e:
+            print(f"[FaceSwapper] Aviso: Não foi possível carregar FaceEnhancer: {e}")
+            self.enhancer = None
+            self.enhancement_enabled = False
+
         self.source_face = None
 
         # Estado para detecção periódica
@@ -36,9 +48,6 @@ class FaceSwapper:
         self.last_faces = []
         
         # Pool de Threads para processamento paralelo
-        # Usa até 5 workers para balancear FPS (paralelismo) vs Latência (tamanho do buffer)
-        # Mais workers = FPS maior mas mais atraso. 5 é um ponto bom (~200ms de atraso).
-        import concurrent.futures
         if max_workers is None:
             cpu_count = os.cpu_count() or 4
             self.max_workers = min(cpu_count, 5)
@@ -78,12 +87,19 @@ class FaceSwapper:
                 res = self.swapper.get(res, face, source_face, paste_back=True)
             except Exception:
                 continue
+        
+        # Aplica melhoria se ativado e disponível
+        if self.enhancer and self.enhancement_enabled:
+            try:
+                res = self.enhancer.enhance(res, faces)
+            except Exception as e:
+                print(f"[FaceSwapper] Erro no enhancer: {e}")
+                
         return res
 
     def process_frame_async(self, frame, detect_interval=5):
         if self.source_face is None:
             # Retorna um future completo com o quadro original
-            import concurrent.futures
             future = concurrent.futures.Future()
             future.set_result(frame)
             return future
@@ -101,7 +117,13 @@ class FaceSwapper:
         # Envia tarefa de troca para o pool de threads
         # Copia quadro e rostos para garantir segurança de thread
         frame_copy = frame.copy()
-        faces_copy = list(self.last_faces) # Cópia rasa da lista é suficiente pois os elementos são tratados como imutáveis aqui
+        faces_copy = list(self.last_faces) 
         
         future = self.executor.submit(self._swap_worker, frame_copy, faces_copy, self.source_face)
         return future
+
+    def toggle_enhancer(self):
+        if self.enhancer:
+            self.enhancement_enabled = not self.enhancement_enabled
+            return self.enhancement_enabled
+        return False
