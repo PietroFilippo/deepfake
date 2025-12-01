@@ -29,7 +29,7 @@ Aplicação de face swapping em tempo real usando webcam, com aceleração GPU v
 
 ### 1. Clone o repositório
 ```bash
-git clone <seu-repositorio>
+git clone <repositorio>
 cd deepfake
 ```
 
@@ -50,10 +50,15 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 pip install -r requirements.txt
 ```
 
-### 4. Baixe o modelo inswapper
-Coloque o arquivo `inswapper_128.onnx` ou a versão 16fp `inswapper_128_fp16.onnx` caso já tenha na pasta `models/`.
+### 4. Instale o TensorRT após de ter baixado e extraido a pasta
+```bash
+pip install "C:\Program Files\TensorRT-10.4.0.26\python\tensorrt_lean-10.4.0-cp311-none-win_amd64.whl"
+```
 
-### 5. Verifique o ambiente
+### 5. Baixe os modelos necessários por fora
+Coloque os arquivos `GFPGANv1.4.onnx` e `inswapper_128.onnx` ou sua versão 16fp `inswapper_128_fp16.onnx` caso já tenha na pasta `models/`.
+
+### 6. Verifique o ambiente
 ```bash
 python tools/check_environment.py
 ```
@@ -121,11 +126,11 @@ python main.py --source <imagem> [opções]
 
 ## "Melhoria" de Rosto (Face Enhancer)
 
-O projeto suporta melhoria de rosto usando o modelo **GFPGAN** para corrigir rostos borrados em resoluções maiores. Isso aumenta a resolução, mas deixa os rostos mais "plásticos" (Qualidade bem pior no escuro se comparado ao inswapper_128).
+O projeto suporta melhoria de rosto usando o modelo **GFPGAN** para corrigir rostos borrados em resoluções maiores. Isso aumenta a resolução, mas deixa os rostos mais "plásticos". Qualidade bem pior no escuro, mas pode ser melhor de perto, varia de acordo com a qualidade da webcam.
 
 - **Modelo**: `models/GFPGANv1.4.onnx` (Baixado externamente igual os outros modelos)
 - **Ativação**: Pressione a tecla `e` durante a execução.
-- **Performance**: Esse enhancer roda em **FP32** (Full Precision) no TensorRT para evitar artefatos visuais. Isso consome mais recursos que o swapper (FP16), então espere uma queda de FPS quando ativado.
+- **Performance**: Esse enhancer roda em **FP32** (Full Precision) no TensorRT para evitar artefatos visuais. Isso consome mais recursos que o swapper (FP16), então espere uma queda de FPS quando ativado. 
 
 ## Câmera Virtual (Discord/Zoom/Teams)
 
