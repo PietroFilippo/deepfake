@@ -5,6 +5,9 @@ import os
 import sys
 import glob
 import numpy as np
+import pyaudio
+import wave
+import threading
 from src.camera import WebcamStream, VideoFileStream
 from src.swapper import FaceSwapper
 
@@ -20,6 +23,64 @@ except Exception as e:
     MOVIEPY_AVAILABLE = False
     print(f"Aviso: Erro inesperado ao importar 'moviepy': {e}")
     print("Processamento de vídeo será sem áudio.")
+
+class AudioRecorder:
+    def __init__(self):
+        self.open = True
+        self.rate = 44100
+        self.frames_per_buffer = 1024
+        self.channels = 1
+        self.format = pyaudio.paInt16
+        self.audio_filename = "temp_audio.wav"
+        self.audio = None
+        self.stream = None
+        self.audio_frames = []
+        
+        try:
+            self.audio = pyaudio.PyAudio()
+            self.stream = self.audio.open(format=self.format,
+                                          channels=self.channels,
+                                          rate=self.rate,
+                                          input=True,
+                                          frames_per_buffer=self.frames_per_buffer)
+        except Exception as e:
+            print(f"Erro ao inicializar áudio: {e}")
+            self.open = False
+
+    def record(self):
+        if not self.open or not self.stream:
+            return
+            
+        self.stream.start_stream()
+        while self.open:
+            try:
+                data = self.stream.read(self.frames_per_buffer)
+                self.audio_frames.append(data)
+            except Exception:
+                break
+
+    def stop(self):
+        self.open = False
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+        if self.audio:
+            self.audio.terminate()
+        
+        if self.audio_frames:
+            waveFile = wave.open(self.audio_filename, 'wb')
+            waveFile.setnchannels(self.channels)
+            waveFile.setsampwidth(self.audio.get_sample_size(self.format))
+            waveFile.setframerate(self.rate)
+            waveFile.writeframes(b''.join(self.audio_frames))
+            waveFile.close()
+            return self.audio_filename
+        return None
+
+    def start(self):
+        if self.open:
+            audio_thread = threading.Thread(target=self.record)
+            audio_thread.start()
 
 def main():
     parser = argparse.ArgumentParser(description="Deepfake em Tempo Real")
@@ -115,7 +176,7 @@ def main():
         cv2.imwrite(out_path, res)
         print(f"Salvo em: {out_path}")
             
-        print("Pressione qualquer tecla para sair...")
+        print("Pressione qualquer tecla para sair.")
         cv2.waitKey(0)
         cv2.destroyAllWindows()
         return
@@ -164,7 +225,7 @@ def main():
                 total_frames = int(clip.duration * fps)
                 start_time = time.time()
                 
-                print(f"Processando {total_frames} frames...")
+                print(f"Processando {total_frames} frames.")
                 
                 # Itera sobre os frames
                 for frame_rgb in clip.iter_frames():
@@ -312,6 +373,9 @@ def main():
     # Estado de gravação
     recording = False
     video_writer = None
+    audio_recorder = None
+    recording_start_time = 0
+    recording_frame_count = 0
 
     while True:
         frame = webcam.read()
@@ -390,12 +454,17 @@ def main():
                 cv2.putText(output, "REC", (70, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             
             if video_writer is None:
+                # Inicia gravação de áudio
+                audio_recorder = AudioRecorder()
+                audio_recorder.start()
+
                 # Cria pasta outputs se não existir
                 if not os.path.exists("outputs"):
                     os.makedirs("outputs")
                 
-                fourcc = cv2.VideoWriter_fourcc(*'XVID')
-                filename = args.out if args.out else f"output_{int(time.time())}.avi"
+                # Usa mp4v para melhor compatibilidade com áudio aac
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                filename = args.out if args.out else f"output_{int(time.time())}.mp4"
                 # Se não for caminho absoluto, salva em outputs/
                 if not os.path.isabs(filename) and not args.out:
                      out_path = os.path.join("outputs", filename)
@@ -404,12 +473,71 @@ def main():
                      
                 video_writer = cv2.VideoWriter(out_path, fourcc, 30.0, (output.shape[1], output.shape[0]))
                 print(f"Gravando em: {out_path}")
+                recording_start_time = time.time()
+                recording_frame_count = 0
             
             video_writer.write(output)
+            recording_frame_count += 1
         elif video_writer:
             video_writer.release()
-            video_writer = None
-            print("Gravação parada.")
+            video_writer = None            
+            # Para gravação de áudio e combina
+            if audio_recorder:
+                print("Processando áudio.")
+                temp_audio = audio_recorder.stop()
+                
+                if temp_audio and os.path.exists(temp_audio):
+                    print("Combinando áudio e vídeo.")
+                    # Cria nome para arquivo temporário de vídeo
+                    temp_video = out_path.replace(".mp4", "_temp.mp4")
+                    if temp_video == out_path:
+                        temp_video = out_path + "_temp.mp4"
+                    
+                    try:
+                        if os.path.exists(out_path):
+                            # Renomeia vídeo original para temp
+                            # Se arquivo temp já existe, remove antes
+                            if os.path.exists(temp_video):
+                                os.remove(temp_video)
+                                
+                            os.rename(out_path, temp_video)
+                            
+                            # Calcula FPS real
+                            elapsed_recording = time.time() - recording_start_time
+                            actual_fps = recording_frame_count / elapsed_recording if elapsed_recording > 0 else 30.0
+                            print(f"FPS real da gravação: {actual_fps:.2f}")
+
+                            # Combina usando ffmpeg com re-encode para ajustar FPS
+                            import subprocess
+                            subprocess.run([
+                                'ffmpeg', '-y', 
+                                '-r', f'{actual_fps:.2f}', 
+                                '-i', temp_video, 
+                                '-i', temp_audio,
+                                '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
+                                '-c:a', 'aac', 
+                                '-map', '0:v:0', '-map', '1:a:0',
+                                out_path
+                            ], check=True, capture_output=True)
+                            
+                            print(f"Gravação concluída com áudio: {out_path}")
+                            
+                            # Limpa arquivos temporários
+                            if os.path.exists(temp_video):
+                                os.remove(temp_video)
+                            if os.path.exists(temp_audio):
+                                os.remove(temp_audio)
+                        else:
+                            print("Erro: Arquivo de vídeo não encontrado para merge.")
+                    except Exception as e:
+                        print(f"Erro ao combinar áudio: {e}")
+                        # Tenta restaurar vídeo original se falhar
+                        if os.path.exists(temp_video) and not os.path.exists(out_path):
+                            os.rename(temp_video, out_path)
+                else:
+                    print("Áudio não gravado ou erro ao salvar.")
+                
+                audio_recorder = None
         
         cv2.imshow("Deepfake Real-time", output)
         
