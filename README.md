@@ -8,6 +8,9 @@ Aplicação de face swapping em tempo real usando webcam, com aceleração GPU v
 - **Processamento assíncrono**: Pipeline multi-threaded com buffer de frames
 - **Detecção inteligente**: Face detection com downscaling periódico
 - **Suporte a múltiplos providers**: TensorRT → CUDA → CPU (fallback automático)
+- **Múltiplos modos de entrada**: Webcam em tempo real, vídeos ou imagens estáticas
+- **Preservação de áudio**: Mantém áudio original ao processar vídeos
+- **Sistema de gravação**: Grave a saída processada em tempo real
 
 ## Pré-requisitos
 
@@ -70,7 +73,7 @@ Você deve ver: **AMBIENTE CONFIGURADO CORRETAMENTE**
 ```
 deepfake/
 ├── src/                  # Módulos principais
-│   ├── camera.py          # Captura de webcam com threading
+│   ├── camera.py          # Captura de webcam/vídeo com threading
 │   ├── swapper.py         # Face detection e swapping
 │   └── utils.py           # Utilitários compartilhados (DLL setup, providers)
 ├── tools/                # Utilitários Python
@@ -83,16 +86,38 @@ deepfake/
 │   └── run.bat
 ├── models/               # Modelos ONNX (inswapper)
 ├── images/               # Imagens de origem
+├── outputs/              # Vídeos e imagens processados
 ├── main.py              # Aplicação principal
 └── requirements.txt     # Dependências Python
 ```
 
 ## Uso
 
-### Execução básica
+### Modos de Operação
+
+#### 1. Webcam em Tempo Real (Padrão)
 ```bash
 python main.py --source images/minha_foto.jpg
 ```
+
+#### 2. Processamento de Vídeo (Offline)
+Processa um vídeo frame-by-frame e salva com áudio preservado:
+```bash
+python main.py --source images/minha_foto.jpg --video images/meu_video.mp4
+```
+- Processamento offline para qualidade máxima
+- Áudio original preservado (via MoviePy)
+- Barra de progresso em tempo real
+- Salva automaticamente em `outputs/` com nome único
+
+#### 3. Processamento de Imagem Estática
+Troca rosto em uma imagem:
+```bash
+python main.py --source images/minha_foto.jpg --image images/alvo.jpg
+```
+- Processa uma única imagem
+- Salva automaticamente em `outputs/`
+- Exibe resultado na tela
 
 ### Usando script auxiliar
 ```bash
@@ -107,6 +132,10 @@ python main.py --source <imagem> [opções]
 #### Argumentos Principais
 - `--source`: Imagem do rosto que será aplicado (obrigatório)
 - `--model`: Caminho para modelo inswapper (padrão: `models/inswapper_128_fp16.onnx`)
+- `--video`: Caminho para vídeo de entrada (processamento offline)
+- `--image`: Caminho para imagem de entrada (processamento estático)
+- `--out`: Caminho customizado para arquivo de saída
+- `--enhance`: Ativa GFPGAN por padrão ao iniciar (Pode ser usado com vídeos e imagens)
 
 #### Argumentos de Performance
 - `--max-workers`: Número de threads paralelas (Padrão: auto).
@@ -117,12 +146,14 @@ python main.py --source <imagem> [opções]
 - `--camera-fps`: Solicita FPS específico para a webcam (Padrão: 30).
 - `--virtual-cam`: Ativa saída para OBS Virtual Camera (Útil para Discord, Zoom, etc).
 
-### Controles
+### Controles (Modo Webcam)
 - **q**: Sair da aplicação
 - **n**: Trocar para próxima imagem da pasta `images/`
 - **p**: Trocar para imagem anterior da pasta `images/`
 - **x**: Ativar/Desativar troca de rosto (mostra webcam original)
 - **e**: Ativar/Desativar "melhoria" de rosto (GFPGAN)
+- **r**: Iniciar/Parar gravação (salva em `outputs/`)
+- **u**: Mostrar/Ocultar interface (FPS, status, indicador REC)
 
 ## "Melhoria" de Rosto (Face Enhancer)
 
@@ -144,6 +175,26 @@ Para usar o deepfake em chamadas de vídeo:
 3.  No Discord/Zoom/Teams, selecione **OBS Virtual Camera** como sua câmera.
     
 > **Nota:** O script suporta 1080p (1920x1080). Se desejar alterar a resolução padrão, edite `src/camera.py` (linhas 12 e 13) e `main.py` (linha 42).
+
+## Gravação e Saída
+
+### Sistema de Gravação
+No modo webcam, você pode gravar a saída processada:
+1. Pressione **'r'** para iniciar a gravação
+2. Um indicador vermelho "REC" aparecerá na tela
+3. Pressione **'r'** novamente para parar
+4. O vídeo é salvo em `outputs/output_<timestamp>.avi`
+
+### Arquivos de Saída
+Todos os arquivos processados são salvos em `outputs/` com nomes únicos:
+- **Vídeos**: `processed_<video>_with_<source>_<timestamp>.mp4`
+- **Imagens**: `processed_<imagem>_with_<source>_<timestamp>.jpg`
+- **Gravações**: `output_<timestamp>.avi`
+
+### Preservação de Áudio
+Ao processar vídeos com `--video`, o áudio original é preservado automaticamente:
+- Requer `moviepy` instalado
+- Usa codec AAC para áudio de alta qualidade
 
 ## Otimização de Performance
 
