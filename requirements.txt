@@ -6,4 +6,5 @@ onnxconverter_common
 polygraphy
 pyvirtualcam
 moviepy
+pyaudio
 # tensorrt: Instale manualmente como mencionado no README.md (requer login NVIDIA)

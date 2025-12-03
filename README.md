@@ -1,6 +1,6 @@
-# Deepfake em Tempo Real com Webcam
+# Deepfake em Tempo Real com Webcam e em Vídeos/Imagens
 
-Aplicação de face swapping em tempo real usando webcam, com aceleração GPU via TensorRT e CUDA.
+Aplicação de face swapping em tempo real usando webcam, em vídeos e em imagens estáticas, com aceleração GPU via TensorRT e CUDA.
 
 ## Características
 
@@ -16,12 +16,14 @@ Aplicação de face swapping em tempo real usando webcam, com aceleração GPU v
 
 ### Hardware
 - GPU NVIDIA com suporte CUDA
-- Webcam
+- Webcam (opcional)
+- Microfone para gravação de áudio (opcional)
 
 ### Software
 - **Python 3.11**
-- **CUDA 12.4+** ([Download](https://developer.nvidia.com/cuda-downloads))
-- **TensorRT 10.4.0** ([Download](https://developer.nvidia.com/tensorrt)) - Requer login NVIDIA
+- **FFmpeg** (Adicionado ao PATH do sistema) - Essencial para áudio ([Download](https://www.ffmpeg.org/download.html))
+- **CUDA 12.4+** (Adicionado ao PATH do sistema) ([Download](https://developer.nvidia.com/cuda-downloads))
+- **TensorRT 10.4.0** (Adicionado ao PATH do sistema) ([Download](https://developer.nvidia.com/tensorrt)) - Requer login NVIDIA
   - Extrair para um dos locais padrão:
     - `C:\Program Files\TensorRT-10.4.0.26\` (recomendado)
     - `C:\Program Files\NVIDIA GPU Computing Toolkit\TensorRT\`
@@ -106,7 +108,7 @@ Processa um vídeo frame-by-frame e salva com áudio preservado:
 python main.py --source images/minha_foto.jpg --video images/meu_video.mp4
 ```
 - Processamento offline para qualidade máxima
-- Áudio original preservado (via MoviePy)
+- Áudio original preservado (via MoviePy/FFmpeg)
 - Barra de progresso em tempo real
 - Salva automaticamente em `outputs/` com nome único
 
@@ -183,13 +185,14 @@ No modo webcam, você pode gravar a saída processada:
 1. Pressione **'r'** para iniciar a gravação
 2. Um indicador vermelho "REC" aparecerá na tela
 3. Pressione **'r'** novamente para parar
-4. O vídeo é salvo em `outputs/output_<timestamp>.avi`
+4. O áudio do microfone será gravado e sincronizado automaticamente
+5. O vídeo é salvo em `outputs/output_<timestamp>.mp4` (com áudio)
 
 ### Arquivos de Saída
 Todos os arquivos processados são salvos em `outputs/` com nomes únicos:
 - **Vídeos**: `processed_<video>_with_<source>_<timestamp>.mp4`
 - **Imagens**: `processed_<imagem>_with_<source>_<timestamp>.jpg`
-- **Gravações**: `output_<timestamp>.avi`
+- **Gravações**: `output_<timestamp>.mp4`
 
 ### Preservação de Áudio
 Ao processar vídeos com `--video`, o áudio original é preservado automaticamente:
