@@ -17,6 +17,11 @@ images/*
 # Mantém a pasta images/
 !images/.gitkeep
 
+# Vídeos dentro da pasta outputs/ (dados privados)
+outputs/*
+# Mantém a pasta outputs/
+!outputs/.gitkeep
+
 # Python
 __pycache__/
 *.py[cod]
