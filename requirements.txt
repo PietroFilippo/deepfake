@@ -7,4 +7,5 @@ polygraphy
 pyvirtualcam
 moviepy
 pyaudio
+imageio
 # tensorrt: Instale manualmente como mencionado no README.md (requer login NVIDIA)

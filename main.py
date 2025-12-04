@@ -92,6 +92,7 @@ def main():
     parser.add_argument("--virtual-cam", action="store_true", help="Ativa saída para câmera virtual (OBS Virtual Camera).")
     parser.add_argument("--video", help="Caminho para arquivo de vídeo de destino")
     parser.add_argument("--image", help="Caminho para imagem de destino")
+    parser.add_argument("--gif", help="Caminho para arquivo GIF de destino")
     parser.add_argument("--out", help="Caminho para salvar o vídeo gravado/processado")
     parser.add_argument("--enhance", action="store_true", help="Ativa melhoria de rosto (GFPGAN) por padrão")
     args = parser.parse_args()
@@ -322,6 +323,75 @@ def main():
         cap.release()
         out.release()
         cv2.destroyAllWindows()
+        return
+
+    # Modo GIF
+    if args.gif:
+        print(f"Processando GIF: {args.gif}")
+        if not os.path.exists(args.gif):
+            print("Erro: Arquivo GIF não encontrado.")
+            sys.exit(1)
+            
+        if not os.path.exists("outputs"):
+            os.makedirs("outputs")
+            
+        if args.out:
+            filename = args.out
+        else:
+            gif_name = os.path.splitext(os.path.basename(args.gif))[0]
+            source_name = os.path.splitext(os.path.basename(image_files[current_image_index]))[0]
+            filename = f"processed_{gif_name}_with_{source_name}_{int(time.time())}.gif"
+
+        if not os.path.isabs(filename) and not args.out:
+             out_path = os.path.join("outputs", filename)
+        else:
+             out_path = filename
+
+        try:
+            import imageio
+            
+            if MOVIEPY_AVAILABLE:
+                clip = VideoFileClip(args.gif)
+                # Tenta obter FPS, se não tiver (comum em alguns GIFs), assume 15
+                fps = clip.fps if clip.fps else 15 
+                
+                frames = []
+                # Estimativa de frames
+                total_frames = int(clip.duration * fps) if clip.duration else "Desconhecido"
+                print(f"Lendo GIF.")
+                
+                frame_count = 0
+                for frame_rgb in clip.iter_frames():
+                    # MoviePy retorna RGB
+                    frame_rgb = np.array(frame_rgb)
+                    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                    
+                    # Detecta e troca faces
+                    faces = swapper._detect_faces_downscale(frame_bgr, scale=0.5)
+                    try:
+                        res_bgr = swapper._swap_worker(frame_bgr, faces, swapper.source_face)
+                    except Exception:
+                        res_bgr = frame_bgr
+                        
+                    # Converte de volta para RGB para o GIF
+                    res_rgb = cv2.cvtColor(res_bgr, cv2.COLOR_BGR2RGB)
+                    frames.append(res_rgb)
+                    
+                    frame_count += 1
+                    print(f"\rProcessando frame: {frame_count}", end="")
+                
+                print("\nSalvando GIF.")
+                # Salva usando imageio
+                imageio.mimsave(out_path, frames, fps=fps, loop=0)
+                print(f"Salvo em: {out_path}")
+                clip.close()
+            else:
+                print("Erro: MoviePy necessário para processar GIFs.")
+                sys.exit(1)
+                
+        except Exception as e:
+            print(f"Erro ao processar GIF: {e}")
+            
         return
 
     # Modo Webcam (Real-time)
