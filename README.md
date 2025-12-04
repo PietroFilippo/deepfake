@@ -8,7 +8,7 @@ Aplicação de face swapping em tempo real usando webcam, em vídeos e em imagen
 - **Processamento assíncrono**: Pipeline multi-threaded com buffer de frames
 - **Detecção inteligente**: Face detection com downscaling periódico
 - **Suporte a múltiplos providers**: TensorRT → CUDA → CPU (fallback automático)
-- **Múltiplos modos de entrada**: Webcam em tempo real, vídeos ou imagens estáticas
+- **Múltiplos modos de entrada**: Webcam em tempo real, vídeos, GIFs ou imagens estáticas
 - **Preservação de áudio**: Mantém áudio original ao processar vídeos
 - **Sistema de gravação**: Grave a saída processada em tempo real
 
@@ -120,6 +120,16 @@ python main.py --source images/minha_foto.jpg --image images/alvo.jpg
 - Processa uma única imagem
 - Salva automaticamente em `outputs/`
 - Exibe resultado na tela
+- Salva automaticamente em `outputs/`
+
+#### 4. Processamento de GIF
+Troca rosto em um arquivo GIF animado:
+```bash
+python main.py --source images/minha_foto.jpg --gif images/animacao.gif
+```
+- Processa frame a frame
+- Mantém a velocidade (FPS) original
+- Salva como novo GIF em `outputs/`
 
 ### Usando script auxiliar
 ```bash
@@ -136,6 +146,7 @@ python main.py --source <imagem> [opções]
 - `--model`: Caminho para modelo inswapper (padrão: `models/inswapper_128_fp16.onnx`)
 - `--video`: Caminho para vídeo de entrada (processamento offline)
 - `--image`: Caminho para imagem de entrada (processamento estático)
+- `--gif`: Caminho para GIF de entrada (processamento animado)
 - `--out`: Caminho customizado para arquivo de saída
 - `--enhance`: Ativa GFPGAN por padrão ao iniciar (Pode ser usado com vídeos e imagens)
 
