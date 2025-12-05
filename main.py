@@ -5,11 +5,17 @@ import os
 import sys
 import glob
 import numpy as np
-import pyaudio
-import wave
 import threading
 from src.camera import WebcamStream, VideoFileStream
 from src.swapper import FaceSwapper
+
+try:
+    import pyaudio
+    import wave
+    AUDIO_AVAILABLE = True
+except ImportError:
+    AUDIO_AVAILABLE = False
+    print("Aviso: 'pyaudio' não encontrado. Gravação de áudio desativada.")
 
 # Tenta importar moviepy para processamento de vídeo com áudio
 try:
@@ -30,12 +36,16 @@ class AudioRecorder:
         self.rate = 44100
         self.frames_per_buffer = 1024
         self.channels = 1
-        self.format = pyaudio.paInt16
+        self.format = pyaudio.paInt16 if AUDIO_AVAILABLE else None
         self.audio_filename = "temp_audio.wav"
         self.audio = None
         self.stream = None
         self.audio_frames = []
         
+        if not AUDIO_AVAILABLE:
+            self.open = False
+            return
+
         try:
             self.audio = pyaudio.PyAudio()
             self.stream = self.audio.open(format=self.format,
