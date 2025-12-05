@@ -83,6 +83,7 @@ deepfake/
 │   ├── benchmark_model.py     # Benchmark de inferência
 │   ├── convert_fp16_v2.py     # Conversão para FP16
 │   └── fix_trt_dlls.py        # Copia DLLs do TensorRT
+│   └── inspect_model.py       # Inspeção de modelos ONNX
 ├── scripts/              # Scripts de automação
 │   ├── install_dependencies.bat
 │   └── run.bat
@@ -262,6 +263,12 @@ Converte modelos ONNX de FP32 para FP16 (~2x mais rápido).
 python tools/fix_trt_dlls.py
 ```
 Copia DLLs do TensorRT para ONNX Runtime (raramente necessário com auto-detecção).
+
+### Inspeção de modelos ONNX
+```bash
+python tools/inspect_model.py --model models/modelo_exemplo.onnx
+```
+Inspeiona a assinatura do modelo ONNX e salva em `model_info.txt`. Útil para verificar a compatibilidade do modelo com o sistema e para a implementação de novos modelos.
 
 ## Troubleshooting
 
