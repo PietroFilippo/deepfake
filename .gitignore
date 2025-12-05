@@ -59,3 +59,4 @@ results/
 
 # Informações de GPU (pode conter dados específicos do sistema)
 gpu_info.txt
+model_info.txt
