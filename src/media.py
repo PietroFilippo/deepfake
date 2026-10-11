@@ -1,6 +1,7 @@
 """
 Offline processing of images, videos and GIFs.
 """
+import json
 import math
 import shutil
 import subprocess
@@ -42,22 +43,35 @@ def process_image(swapper, image_path, out_path, show=True):
         cv2.destroyAllWindows()
 
 
-def _probe_frame_rate(video_path, average_fps):
+def _probe_video_stream(video_path, average_fps):
     """
-    The stream's nominal frame rate from ffprobe (e.g. 30/1 or 30000/1001). OpenCV only reports the
-    average rate, which is wrong for variable frame rate videos (common from phones).
-    Falls back to the average when ffprobe is missing or reports something implausible.
+    Returns (frame_rate, duration_ms) of the first video stream using ffprobe.
+
+    frame_rate is the stream's nominal rate (e.g. 30/1 or 30000/1001). OpenCV only reports the
+    average rate, which is wrong for variable frame rate videos (common from phones); the average
+    is used when ffprobe is missing or reports something implausible.
+    duration_ms is the stream's length (None if unknown).
     """
+    rate = Fraction(average_fps).limit_denominator(1001)
+    duration_ms = None
     try:
         result = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
-                                 'stream=r_frame_rate', '-of', 'csv=p=0', video_path],
+                                 'stream=r_frame_rate,duration', '-of', 'json', video_path],
                                 capture_output=True, text=True, check=True)
-        rate = Fraction(result.stdout.strip().splitlines()[0])
-        if average_fps * 0.95 <= rate <= 120:
-            return rate
-    except (OSError, subprocess.CalledProcessError, ValueError, ZeroDivisionError, IndexError):
+        stream = json.loads(result.stdout)['streams'][0]
+    except (OSError, subprocess.CalledProcessError, ValueError, KeyError, IndexError):
+        return rate, duration_ms
+    try:
+        probed = Fraction(stream['r_frame_rate'])
+        if average_fps * 0.95 <= probed <= 120:
+            rate = probed
+    except (KeyError, ValueError, ZeroDivisionError):
         pass
-    return Fraction(average_fps).limit_denominator(1001)
+    try:
+        duration_ms = float(stream['duration']) * 1000.0
+    except (KeyError, ValueError):
+        pass
+    return rate, duration_ms
 
 
 def process_video(swapper, video_path, out_path):
@@ -65,7 +79,7 @@ def process_video(swapper, video_path, out_path):
     if not cap.isOpened():
         raise ValueError(f"Could not open the video: {video_path}")
 
-    fps = _probe_frame_rate(video_path, cap.get(cv2.CAP_PROP_FPS) or 30.0)
+    fps, duration_ms = _probe_video_stream(video_path, cap.get(cv2.CAP_PROP_FPS) or 30.0)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -114,7 +128,7 @@ def process_video(swapper, video_path, out_path):
 
     first_ms = None
     pending = None  # last decoded frame, written once the next frame's timestamp is known
-    pending_ms = previous_ms = 0.0
+    pending_ms = 0.0
     frame_count = 0
     start_time = time.time()
     try:
@@ -135,15 +149,15 @@ def process_video(swapper, video_path, out_path):
             if pending is not None:
                 # Half a slot of tolerance absorbs rounded/jittery timestamps
                 emit(pending, math.ceil(timestamp / frame_interval_ms - 0.5))
-            pending, previous_ms, pending_ms = frame, pending_ms, timestamp
+            pending, pending_ms = frame, timestamp
 
             if frame_count % 10 == 0:
                 _print_progress(frame_count, total_frames, start_time)
 
         if pending is not None:
-            # The last frame lasts as long as the one before it
-            last_duration = pending_ms - previous_ms if frame_count > 1 else frame_interval_ms
-            emit(pending, max(written + 1, math.ceil((pending_ms + last_duration) / frame_interval_ms - 0.5)))
+            # The last frame lasts until the end of the stream (one frame if the length is unknown)
+            end_ms = (duration_ms - first_ms) if duration_ms else pending_ms + frame_interval_ms
+            emit(pending, max(written + 1, math.ceil(end_ms / frame_interval_ms - 0.5)))
     except BrokenPipeError:
         pass  # ffmpeg exited early, its error is reported below
     finally:

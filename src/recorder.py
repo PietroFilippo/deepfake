@@ -36,6 +36,10 @@ class AudioRecorder:
         self.frames_written = 0
         self.recording = False
         self.thread = None
+        # Hand-over between stop() and a reader thread that outlives it
+        self.lock = threading.Lock()
+        self.reader_done = False
+        self.abandoned = False
         self.audio = None
         self.stream = None
 
@@ -77,16 +81,36 @@ class AudioRecorder:
         self.thread.start()
 
     def _record(self):
-        while self.recording:
-            try:
-                # Don't raise on input overflow (e.g. when the main loop is busy): that used to
-                # end the audio silently and leave the recording shorter than the video
-                data = self.stream.read(self.frames_per_buffer, exception_on_overflow=False)
-            except Exception as e:
-                print(f"Audio recording stopped: {e}")
-                break
-            self.wave_file.writeframes(data)
-            self.frames_written += 1
+        try:
+            while self.recording:
+                try:
+                    # Don't raise on input overflow (e.g. when the main loop is busy): that used to
+                    # end the audio silently and leave the recording shorter than the video
+                    data = self.stream.read(self.frames_per_buffer, exception_on_overflow=False)
+                except Exception as e:
+                    print(f"Audio recording stopped: {e}")
+                    break
+                if not self.recording:
+                    break
+                self.wave_file.writeframes(data)
+                self.frames_written += 1
+        finally:
+            with self.lock:
+                self.reader_done = True
+                abandoned = self.abandoned
+            if abandoned:
+                # stop() gave up waiting for this thread, so it cleans up after itself
+                self._release()
+                try:
+                    os.remove(self.filename)
+                except OSError:
+                    pass
+
+    def _release(self):
+        if self.wave_file:
+            self.wave_file.close()
+            self.wave_file = None
+        self._close()
 
     def _close(self):
         if self.stream:
@@ -103,20 +127,17 @@ class AudioRecorder:
         # Wait for the reader thread before closing the stream it is reading from
         if self.thread:
             self.thread.join(timeout=2.0)
-            if self.thread.is_alive():
-                # The device is stuck in a read: leave it alone (daemon thread) and give up on the audio
-                print("Warning: microphone did not stop in time, recording without audio.")
-                return None
-        self._close()
+            with self.lock:
+                if not self.reader_done:
+                    # The device is stuck in a read: leave it to the (daemon) reader thread,
+                    # which releases everything once the read returns, and give up on the audio
+                    self.abandoned = True
+                    print("Warning: microphone did not stop in time, recording without audio.")
+                    return None
 
-        if not self.wave_file:
-            return None
-        self.wave_file.close()
-        self.wave_file = None
-        if self.frames_written == 0:
-            os.remove(self.filename)
-            return None
-        return self.filename
+        has_audio = self.wave_file is not None and self.frames_written > 0
+        self._release()
+        return self.filename if has_audio else None
 
 
 class Recorder:
@@ -159,8 +180,10 @@ class Recorder:
         audio_path = self.audio_recorder.stop()
         if not audio_path:
             print("Audio not recorded or error while saving.")
-            if os.path.exists(self.temp_audio):
+            try:
                 os.remove(self.temp_audio)
+            except OSError:
+                pass  # Missing, or still held by a stuck microphone thread
 
         if self.frame_count == 0:
             os.remove(self.temp_video)

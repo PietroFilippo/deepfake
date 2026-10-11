@@ -216,7 +216,7 @@ python main.py --source images/my_photo.jpg --video images/my_video.mp4 --pixel-
 
 [HyperSwap](https://github.com/facefusion/facefusion-labs/tree/master/hyperswap) is a face swap model released by the FaceFusion team in 2025. It works at 256x256 natively, uses the same face alignment and identity embedding (ArcFace) as inswapper, and runs about as fast on TensorRT as `inswapper_128` (~6.5 ms per run on an RTX 4060 Ti), so it gives twice the resolution at the same cost. Pixel boost also works with it (`--pixel-boost 512` = 4 runs per face).
 
-Download one of the three variants (they were trained differently; try them all and keep the one whose likeness you prefer) into `models/`:
+Download one of the three variants into `models/` (there is no published ranking between them; try them and keep the one whose likeness you prefer):
 - [hyperswap_1a_256.onnx](https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1a_256.onnx)
 - [hyperswap_1b_256.onnx](https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1b_256.onnx)
 - [hyperswap_1c_256.onnx](https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1c_256.onnx)
@@ -318,9 +318,9 @@ Checks TensorRT, CUDA, ONNX Runtime, PyTorch, and all dependencies.
 
 ### Model benchmark
 ```bash
-python tools/benchmark_model.py
+python tools/benchmark_model.py --model models/hyperswap_1a_256.onnx
 ```
-Measures average inference time and estimated FPS.
+Measures the average inference time and estimated FPS of a swap model (default: `models/inswapper_128_fp16.onnx`).
 
 ### FP16 conversion
 ```bash
