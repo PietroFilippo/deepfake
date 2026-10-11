@@ -145,6 +145,7 @@ This creates `dist\Deepfake\` with `Deepfake.exe` (a few minutes). Copy or zip t
 - The folder is **~4 GB**: almost all of it is NVIDIA's CUDA, cuDNN and TensorRT libraries, which ONNX Runtime needs on the GPU. A single-file .exe isn't practical with that size (it would have to unpack 4 GB on every launch), so it's a folder with the .exe inside.
 - On first start the app asks for your models folder (or put the `.onnx` files in `dist\Deepfake\models\`). `settings.json`, `trt_cache\`, `outputs\` and `deepfake.log` live next to the .exe, so keep the folder somewhere writable (not `Program Files`).
 - The TensorRT engines are built again on the first start on each PC (a few minutes).
+- Rebuilding keeps `settings.json`, `trt_cache\`, `models\`, `images\` and `outputs\` inside `dist\Deepfake\`.
 - `Deepfake.exe --self-test` loads the models and checks the GPU setup without opening a window; the result is written to `deepfake.log`. `python app.py --self-test` does the same from source.
 - Audio for videos and recordings uses the FFmpeg bundled with the app when FFmpeg isn't installed.
 
