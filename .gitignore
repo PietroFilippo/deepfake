@@ -64,3 +64,7 @@ model_info.txt
 # App settings and log (per machine)
 settings.json
 deepfake.log
+
+# PyInstaller output
+build/
+dist/

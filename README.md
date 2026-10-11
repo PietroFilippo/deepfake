@@ -102,7 +102,9 @@ deepfake/
 │   └── inspect_model.py       # ONNX model inspection
 ├── scripts/                   # Automation scripts
 │   ├── install_dependencies.bat
+│   ├── build_exe.bat          # Builds dist\Deepfake\Deepfake.exe
 │   └── run.bat
+├── packaging/                 # PyInstaller spec and build script for the .exe
 ├── models/                    # ONNX models (inswapper)
 ├── images/                    # Source images
 ├── outputs/                   # Processed videos and images
@@ -130,6 +132,21 @@ Press **Tab** (or **F1**) to open the settings overlay on top of the live video.
 Keys: **Tab/F1** settings · **Esc** close settings · **F11** fullscreen · **N/P** next/previous face · **X** swap on/off · **E** enhancer · **B** pixel boost · **M** face mask · **R** record · **U** HUD · **Q** quit
 
 The first time a model is used, TensorRT builds an engine for it (from a few seconds up to a few minutes); the live view keeps running with the previous model meanwhile.
+
+Closing the window while recording or processing a file finishes the recording (and stops the file job cleanly) before the app exits.
+
+### Standalone .exe (Optional)
+
+To run the app on a PC without Python, CUDA or TensorRT installed, build a self-contained folder:
+```bash
+scripts\build_exe.bat
+```
+This creates `dist\Deepfake\` with `Deepfake.exe` (a few minutes). Copy or zip the whole folder; only the **NVIDIA driver** is needed on the target PC.
+- The folder is **~4 GB**: almost all of it is NVIDIA's CUDA, cuDNN and TensorRT libraries, which ONNX Runtime needs on the GPU. A single-file .exe isn't practical with that size (it would have to unpack 4 GB on every launch), so it's a folder with the .exe inside.
+- On first start the app asks for your models folder (or put the `.onnx` files in `dist\Deepfake\models\`). `settings.json`, `trt_cache\`, `outputs\` and `deepfake.log` live next to the .exe, so keep the folder somewhere writable (not `Program Files`).
+- The TensorRT engines are built again on the first start on each PC (a few minutes).
+- `Deepfake.exe --self-test` loads the models and checks the GPU setup without opening a window; the result is written to `deepfake.log`. `python app.py --self-test` does the same from source.
+- Audio for videos and recordings uses the FFmpeg bundled with the app when FFmpeg isn't installed.
 
 ### Command Line
 

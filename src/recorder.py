@@ -10,6 +10,8 @@ import wave
 
 import cv2
 
+from .utils import ffmpeg_executable
+
 try:
     import pyaudio
     AUDIO_AVAILABLE = True
@@ -196,7 +198,7 @@ class Recorder:
         actual_fps = self.frame_count / elapsed if elapsed > 0 else 30.0
         print(f"Actual recording FPS: {actual_fps:.2f}")
 
-        cmd = ['ffmpeg', '-y', '-loglevel', 'error', '-r', f'{actual_fps:.3f}', '-i', self.temp_video]
+        cmd = [ffmpeg_executable() or 'ffmpeg', '-y', '-loglevel', 'error', '-r', f'{actual_fps:.3f}', '-i', self.temp_video]
         if audio_path:
             cmd += ['-i', audio_path, '-map', '0:v:0', '-map', '1:a:0', '-c:a', 'aac']
         cmd += ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', self.out_path]
