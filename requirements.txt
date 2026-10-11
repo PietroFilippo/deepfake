@@ -7,4 +7,5 @@ polygraphy
 pyvirtualcam
 pyaudio
 pillow
+PySide6-Essentials
 # tensorrt: Install manually as described in README.md (requires NVIDIA login)

@@ -4,11 +4,13 @@ Face swapping application that works in real time on a webcam feed, as well as o
 
 ## Features
 
+- **Desktop app**: Live preview with a settings overlay (Tab) to change faces, models and options at any time
 - **Optimized performance**: Uses TensorRT for accelerated GPU inference
 - **Asynchronous processing**: Multi-threaded pipeline with a frame buffer
 - **Fast detection**: Only the face detector runs on target frames; blending only touches the face region
 - **Pixel boost**: Swaps the face at up to 512x512 with the 128px inswapper model for sharper results
 - **Face enhancer**: GFPGAN or GPEN on properly aligned faces, with an adjustable blend
+- **Landmark smoothing**: Faces are followed between frames to remove jitter (no shimmering face)
 - **Multiple provider support**: TensorRT → CUDA → CPU (automatic fallback)
 - **Multiple input modes**: Real-time webcam, videos, GIFs, or static images
 - **Audio preservation**: Keeps the original audio when processing videos
@@ -82,6 +84,7 @@ You should see: **ENVIRONMENT CONFIGURED CORRECTLY**
 ```
 deepfake/
 ├── src/                       # Core modules
+│   ├── gui/                   # Desktop app (window, settings overlay, live pipeline)
 │   ├── camera.py              # Threaded webcam capture
 │   ├── swapper.py             # Face detection, swapping and pixel boost
 │   ├── enhancer.py            # Face enhancer (GFPGAN / GPEN)
@@ -89,6 +92,7 @@ deepfake/
 │   ├── face_utils.py          # Alignment, masks and paste-back
 │   ├── media.py               # Offline image/video/GIF processing
 │   ├── recorder.py            # Webcam recording with microphone audio
+│   ├── tracking.py            # Landmark smoothing between frames
 │   └── utils.py               # Shared utilities (paths, DLL setup, providers)
 ├── tools/                     # Python utilities
 │   ├── check_environment.py   # Full diagnostics
@@ -102,11 +106,32 @@ deepfake/
 ├── models/                    # ONNX models (inswapper)
 ├── images/                    # Source images
 ├── outputs/                   # Processed videos and images
-├── main.py                    # Main application
+├── app.py                     # Desktop app
+├── Deepfake.bat               # Double-click launcher for the desktop app
+├── main.py                    # Command-line application
 └── requirements.txt           # Python dependencies
 ```
 
 ## Usage
+
+### Desktop App (Recommended)
+
+Double-click **`Deepfake.bat`** (or run `python app.py`). The first time, the app asks for your models folder (the one with `inswapper_128_fp16.onnx` / `hyperswap_1a_256.onnx`); it remembers it, together with all other settings, in `settings.json`.
+
+Press **Tab** (or **F1**) to open the settings overlay on top of the live video. Everything applies immediately:
+- **Source face**: thumbnails of the images in your faces folder (click one), or any other image
+- **Face swap**: swap model (switch between inswapper and HyperSwap at any time), pixel boost for the live view and for files, face mask
+- **Face enhancer**: on/off, model (GFPGAN / GPEN) and blend
+- **Face detection**: landmark smoothing, detector size, detection interval
+- **Camera**: camera index, resolution, FPS, virtual camera (OBS), worker threads
+- **Recording and files**: record the live output, process an image/video/GIF (with progress and cancel), open the outputs folder
+- **Folders**: models, faces and outputs folders
+
+Keys: **Tab/F1** settings · **Esc** close settings · **F11** fullscreen · **N/P** next/previous face · **X** swap on/off · **E** enhancer · **B** pixel boost · **M** face mask · **R** record · **U** HUD · **Q** quit
+
+The first time a model is used, TensorRT builds an engine for it (from a few seconds up to a few minutes); the live view keeps running with the previous model meanwhile.
+
+### Command Line
 
 ### Operating Modes
 
@@ -167,20 +192,21 @@ python main.py --source <image> [options]
 - `--enhance`: Enables the face enhancer by default on startup (can be used with videos and images)
 - `--enhancer-model`: Enhancer model (default: `models/GFPGANv1.4.onnx`, e.g. `models/GPEN-BFR-512.onnx`)
 - `--enhance-blend`: How much of the enhanced face is mixed in, 0-1 (default: 0.8). Lower = less "plastic".
-- `--det-size`: Face detector input size (default: 320 for the webcam, 640 for files).
+- `--det-size`: Face detector input size: `320`, `480` or `640` (default: 640, ~5.5 ms; 320 is ~2.5 ms faster but its landmarks are less precise).
+- `--no-smoothing`: Disables landmark smoothing between frames (webcam and videos).
 
 #### Webcam / Performance Arguments
 - `--max-workers`: Number of parallel threads (default: auto).
   - Lower (2-3) = Lower latency (less delay), lower FPS.
   - Higher (5-6) = Higher FPS, higher latency (more delay).
-- `--detect-interval`: Frame interval for face detection (default: 2).
+- `--detect-interval`: Detect faces every N frames (default: 1).
   - `1` = the face follows your movements most closely; higher values save a few ms per frame.
 - `--camera`: Webcam index (default: 0).
 - `--width` / `--height`: Requested webcam resolution (default: 1920x1080).
 - `--camera-fps`: Requests a specific FPS from the webcam (default: 30).
 - `--virtual-cam`: Enables output to OBS Virtual Camera (useful for Discord, Zoom, etc.).
 
-### Controls (Webcam Mode)
+### Controls (Command-Line Webcam Mode)
 - **q**: Quit the application
 - **n**: Switch to the next image in the `images/` folder
 - **p**: Switch to the previous image in the `images/` folder
@@ -206,6 +232,8 @@ python main.py --source <image> [options]
 
 2. **Face enhancer** (`--enhance`, or the `e` key): restores detail with GFPGAN (or GPEN with `--enhancer-model models/GPEN-BFR-512.onnx`). Use `--enhance-blend 0.5` if the result looks too "plastic".
 3. **Parser mask** (`--face-mask parser`, or the `m` key): keeps whatever is in front of the target face (hair, hands, glasses).
+
+Landmark smoothing is on by default: the detector's 5 landmarks jitter by a few pixels from frame to frame, which makes the swapped face shimmer. Faces are followed between frames and smoothed with a One Euro filter (strong smoothing while still, almost no lag while moving), which removed about a third of the jitter on test videos without measurable lag.
 
 Recommended for files:
 ```bash
@@ -368,8 +396,8 @@ pip install --force-reinstall torch torchvision --index-url https://download.pyt
 ### Low FPS
 1. Use the FP16 model: `python tools/convert_fp16_v2.py`
 2. Use `--pixel-boost 128` and turn off the enhancer/parser mask
-3. Reduce the detection resolution: `--det-size 256`
-4. Increase the detection interval: `--detect-interval 5`
+3. Reduce the detection resolution: `--det-size 320`
+4. Increase the detection interval: `--detect-interval 2`
 5. Check that TensorRT is being used: `python tools/check_environment.py`
 
 ### Providers not available
@@ -380,7 +408,7 @@ Run `python tools/check_environment.py` for a full diagnosis.
 ## Expected Performance
 
 Tested with an RTX 4060 Ti + TensorRT FP16:
-- **Detection**: ~3ms per frame (detector only, 320x320)
+- **Detection**: ~5.5ms per frame (detector only, 640x640; ~3ms at 320x320)
 - **Swapping**: ~7ms per face (pixel boost 128), ~27ms (256)
 - **Enhancer**: ~40ms per face (GFPGAN, FP32)
 - **Target FPS**: 15-30 FPS (depends on the number of faces and settings)

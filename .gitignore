@@ -60,3 +60,7 @@ results/
 # GPU info (may contain system-specific data)
 gpu_info.txt
 model_info.txt
+
+# App settings and log (per machine)
+settings.json
+deepfake.log
