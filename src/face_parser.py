@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import onnxruntime
 import os
+from .utils import get_default_providers, model_path as default_model_path
 
 class FaceParser:
     # ImageNet normalization (standard CelebAMask-HQ BiSeNet training)
@@ -15,20 +16,10 @@ class FaceParser:
     # Only include the face regions that the swap/enhance should affect.
     FACE_CLASSES = (1, 2, 3, 4, 5, 10, 11, 12, 13)
 
-    def __init__(self, model_path="models/face_parser.onnx", providers=None):
+    def __init__(self, model_path=None, providers=None):
+        model_path = model_path or default_model_path("face_parser.onnx")
         if providers is None:
-            providers = [
-                ('TensorrtExecutionProvider', {
-                    'trt_engine_cache_enable': True,
-                    'trt_engine_cache_path': 'trt_cache',
-                    'trt_fp16_enable': True,
-                }),
-                ('CUDAExecutionProvider', {
-                    'cudnn_conv_algo_search': 'HEURISTIC',
-                    'arena_extend_strategy': 'kSameAsRequested',
-                }),
-                'CPUExecutionProvider',
-            ]
+            providers = get_default_providers()
 
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"face_parser model not found at {model_path}")

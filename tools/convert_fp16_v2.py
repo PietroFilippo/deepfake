@@ -1,3 +1,4 @@
+import sys
 import onnx
 from onnxconverter_common import float16
 
@@ -19,3 +20,4 @@ try:
 
 except Exception as e:
     print(f"Error during conversion: {e}")
+    sys.exit(1)

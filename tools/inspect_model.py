@@ -7,7 +7,7 @@ def inspect_model(model_path):
         session = onnxruntime.InferenceSession(model_path, providers=['CPUExecutionProvider'])
     except Exception as e:
         print(f"Error loading model: {e}")
-        return
+        return False
 
     with open("model_info.txt", "w") as f:
         f.write(f"Model: {model_path}\n")
@@ -31,4 +31,4 @@ if __name__ == "__main__":
     parser.add_argument("--model", required=True, help="Path to the ONNX model")
     args = parser.parse_args()
 
-    inspect_model(args.model)
+    sys.exit(0 if inspect_model(args.model) is not False else 1)

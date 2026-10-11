@@ -37,6 +37,7 @@ if not os.path.exists(ort_capi_path):
 dll_files = glob.glob(os.path.join(trt_lib_path, "*.dll"))
 print(f"Found {len(dll_files)} DLLs.")
 
+failed = 0
 for dll in dll_files:
     filename = os.path.basename(dll)
     dest = os.path.join(ort_capi_path, filename)
@@ -45,5 +46,9 @@ for dll in dll_files:
         print(f"Copied {filename}")
     except Exception as e:
         print(f"Failed to copy {filename}: {e}")
+        failed += 1
 
+if failed:
+    print(f"Done with {failed} failed copies")
+    sys.exit(1)
 print("Done")

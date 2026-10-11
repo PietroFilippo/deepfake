@@ -4,6 +4,43 @@ Centralizes common functionality used across multiple modules.
 """
 import os
 
+import cv2
+import numpy as np
+
+# Absolute paths so the app works no matter which directory it is started from
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODELS_DIR = os.path.join(PROJECT_ROOT, 'models')
+OUTPUTS_DIR = os.path.join(PROJECT_ROOT, 'outputs')
+TRT_CACHE_DIR = os.path.join(PROJECT_ROOT, 'trt_cache')
+
+
+def model_path(filename):
+    """Returns the absolute path of a file inside the models/ folder."""
+    return os.path.join(MODELS_DIR, filename)
+
+
+def read_image(path):
+    """
+    cv2.imread that also works with non-ASCII paths on Windows (e.g. accented file names).
+
+    Returns:
+        numpy.ndarray or None: BGR image, or None if the file could not be read
+    """
+    try:
+        data = np.fromfile(path, dtype=np.uint8)
+    except OSError:
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+
+def write_image(path, img):
+    """cv2.imwrite that also works with non-ASCII paths on Windows."""
+    ext = os.path.splitext(path)[1] or '.jpg'
+    ok, buf = cv2.imencode(ext, img)
+    if not ok:
+        raise ValueError(f"Could not encode image as {ext}")
+    buf.tofile(path)
+
 
 def find_tensorrt_lib_path():
     """
@@ -73,19 +110,23 @@ def setup_dll_directories():
         print(f"Warning: Failed to add DLL directories: {e}")
 
 
-def get_default_providers():
+def get_default_providers(fp16=True):
     """
     Returns the default ONNX Runtime execution provider configuration.
     Prioritizes TensorRT > CUDA > CPU.
-    
+
+    Args:
+        fp16 (bool): Let TensorRT build FP16 engines (faster, slightly less precise)
+
     Returns:
         list: List of providers with their settings
     """
+    os.makedirs(TRT_CACHE_DIR, exist_ok=True)
     return [
         ('TensorrtExecutionProvider', {
             'trt_engine_cache_enable': True,
-            'trt_engine_cache_path': 'trt_cache',
-            'trt_fp16_enable': True,
+            'trt_engine_cache_path': TRT_CACHE_DIR,
+            'trt_fp16_enable': fp16,
         }),
         ('CUDAExecutionProvider', {
             'cudnn_conv_algo_search': 'HEURISTIC',

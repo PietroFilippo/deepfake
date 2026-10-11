@@ -3,422 +3,125 @@ import argparse
 import time
 import os
 import sys
-import glob
-import numpy as np
-import threading
-from src.camera import WebcamStream, VideoFileStream
-from src.swapper import FaceSwapper
+from collections import deque
+from src.camera import WebcamStream
+from src.swapper import FaceSwapper, PIXEL_BOOST_SIZES, FACE_MASKS
+from src.recorder import Recorder
+from src.media import process_image, process_video, process_gif
+from src.utils import OUTPUTS_DIR, model_path
 
-try:
-    import pyaudio
-    import wave
-    AUDIO_AVAILABLE = True
-except ImportError:
-    AUDIO_AVAILABLE = False
-    print("Warning: 'pyaudio' not found. Audio recording disabled.")
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
 
-# Try to import moviepy for video processing with audio
-try:
-    from moviepy import VideoFileClip
-    MOVIEPY_AVAILABLE = True
-except ImportError as e:
-    MOVIEPY_AVAILABLE = False
-    print(f"Warning: 'moviepy' could not be imported: {e}")
-    print("Video processing will have no audio.")
-except Exception as e:
-    MOVIEPY_AVAILABLE = False
-    print(f"Warning: Unexpected error while importing 'moviepy': {e}")
-    print("Video processing will have no audio.")
 
-class AudioRecorder:
-    def __init__(self):
-        self.open = True
-        self.rate = 44100
-        self.frames_per_buffer = 1024
-        self.channels = 1
-        self.format = pyaudio.paInt16 if AUDIO_AVAILABLE else None
-        self.audio_filename = "temp_audio.wav"
-        self.audio = None
-        self.stream = None
-        self.audio_frames = []
-
-        if not AUDIO_AVAILABLE:
-            self.open = False
-            return
-
-        try:
-            self.audio = pyaudio.PyAudio()
-            self.stream = self.audio.open(format=self.format,
-                                          channels=self.channels,
-                                          rate=self.rate,
-                                          input=True,
-                                          frames_per_buffer=self.frames_per_buffer)
-        except Exception as e:
-            print(f"Error initializing audio: {e}")
-            self.open = False
-
-    def record(self):
-        if not self.open or not self.stream:
-            return
-
-        self.stream.start_stream()
-        while self.open:
-            try:
-                data = self.stream.read(self.frames_per_buffer)
-                self.audio_frames.append(data)
-            except Exception:
-                break
-
-    def stop(self):
-        self.open = False
-        if self.stream:
-            self.stream.stop_stream()
-            self.stream.close()
-        if self.audio:
-            self.audio.terminate()
-
-        if self.audio_frames:
-            waveFile = wave.open(self.audio_filename, 'wb')
-            waveFile.setnchannels(self.channels)
-            waveFile.setsampwidth(self.audio.get_sample_size(self.format))
-            waveFile.setframerate(self.rate)
-            waveFile.writeframes(b''.join(self.audio_frames))
-            waveFile.close()
-            return self.audio_filename
-        return None
-
-    def start(self):
-        if self.open:
-            audio_thread = threading.Thread(target=self.record)
-            audio_thread.start()
-
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(description="Real-time Deepfake")
     parser.add_argument("--source", help="Path to the initial source image", required=True)
-    parser.add_argument("--model", help="Path to the inswapper model", default="models/inswapper_128_fp16.onnx")
-    parser.add_argument("--max-workers", type=int, default=None, help="Maximum number of threads (workers). Fewer = less latency, more = more FPS.")
-    parser.add_argument("--detect-interval", type=int, default=5, help="Frame interval for face detection. Higher = more FPS.")
-    parser.add_argument("--camera-fps", type=int, default=30, help="Desired webcam FPS.")
-    parser.add_argument("--virtual-cam", action="store_true", help="Enable output to a virtual camera (OBS Virtual Camera).")
-    parser.add_argument("--video", help="Path to the target video file")
-    parser.add_argument("--image", help="Path to the target image")
-    parser.add_argument("--gif", help="Path to the target GIF file")
+    parser.add_argument("--model", help="Path to the inswapper model", default=model_path("inswapper_128_fp16.onnx"))
+
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--video", help="Path to the target video file")
+    target.add_argument("--image", help="Path to the target image")
+    target.add_argument("--gif", help="Path to the target GIF file")
     parser.add_argument("--out", help="Path to save the recorded/processed video")
-    parser.add_argument("--enhance", action="store_true", help="Enable face enhancement (GFPGAN) by default")
+
+    quality = parser.add_argument_group("quality")
+    quality.add_argument("--pixel-boost", type=int, choices=PIXEL_BOOST_SIZES, default=128,
+                         help="Resolution the face is swapped at. Values above 128 run the model on several "
+                              "interleaved 128px tiles: sharper, but (size/128)^2 times slower. Default: 128.")
+    quality.add_argument("--face-mask", choices=FACE_MASKS, default="box",
+                         help="'parser' keeps hair, hands and glasses of the target in front of the face "
+                              "(slower). Default: box.")
+    quality.add_argument("--enhance", action="store_true", help="Enable face enhancement by default")
+    quality.add_argument("--enhancer-model", default=model_path("GFPGANv1.4.onnx"),
+                         help="Face enhancer ONNX model (e.g. models/GFPGANv1.4.onnx or models/GPEN-BFR-512.onnx)")
+    quality.add_argument("--enhance-blend", type=float, default=0.8,
+                         help="How much of the enhanced face is blended in (0-1). Lower = less 'plastic'. Default: 0.8.")
+    quality.add_argument("--det-size", type=int, default=None,
+                         help="Face detector input size. Default: 320 for the webcam, 640 for files.")
+
+    performance = parser.add_argument_group("webcam / performance")
+    performance.add_argument("--max-workers", type=int, default=None, help="Maximum number of threads (workers). Fewer = less latency, more = more FPS.")
+    performance.add_argument("--detect-interval", type=int, default=2, help="Frame interval for face detection. 1 = tightest tracking, higher = more FPS. Default: 2.")
+    performance.add_argument("--camera", type=int, default=0, help="Webcam index. Default: 0.")
+    performance.add_argument("--width", type=int, default=1920, help="Requested webcam width. Default: 1920.")
+    performance.add_argument("--height", type=int, default=1080, help="Requested webcam height. Default: 1080.")
+    performance.add_argument("--camera-fps", type=int, default=30, help="Desired webcam FPS.")
+    performance.add_argument("--virtual-cam", action="store_true", help="Enable output to a virtual camera (OBS Virtual Camera).")
+
     args = parser.parse_args()
-
-    # Look for images in the directory
-    image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp']
-    image_files = []
-    images_dir = os.path.dirname(os.path.abspath(args.source))
-    if not images_dir: # Handles the case where source is just a file name
-        images_dir = "images"
-
-    for ext in image_extensions:
-        image_files.extend(glob.glob(os.path.join(images_dir, ext)))
-
-    # Sort files for a consistent order
-    image_files.sort()
-
-    if not image_files:
-        print(f"Warning: No images found in {images_dir}. Dynamic switching will not work.")
-        image_files = [args.source]
-
-    # Find the starting index
-    try:
-        current_image_index = image_files.index(os.path.abspath(args.source))
-    except ValueError:
-        # Try matching the relative path
-        try:
-             current_image_index = image_files.index(os.path.join(images_dir, os.path.basename(args.source)))
-        except ValueError:
-             # Just append it if not found (e.g. outside the folder)
-             if os.path.exists(args.source):
-                 image_files.append(args.source)
-                 current_image_index = len(image_files) - 1
-             else:
-                 print(f"Error: Source image not found at {args.source}")
-                 sys.exit(1)
-
-    print(f"Available images: {len(image_files)}")
-    print("Initializing.")
-    try:
-        swapper = FaceSwapper(args.model, max_workers=args.max_workers)
-        swapper.set_source_image(image_files[current_image_index])
-        if args.enhance:
-            swapper.enhancement_enabled = True
-            print("Enhancer enabled by default.")
-    except Exception as e:
-        print(f"Error initializing swapper: {e}")
-        sys.exit(1)
-
-    # Static Image Mode
-    if args.image:
-        print(f"Processing single image: {args.image}")
-        target_img = cv2.imread(args.image)
-        if target_img is None:
-            print("Error: Could not read the target image.")
-            sys.exit(1)
-
-        # Detect faces in the target image
-        faces = swapper.app.get(target_img)
-        res = target_img.copy()
-
-        # Perform the swap
-        try:
-            res = swapper._swap_worker(target_img, faces, swapper.source_face)
-        except Exception as e:
-            print(f"Swap error: {e}")
-
-        cv2.imshow("Deepfake Image", res)
-
-        # Auto-save logic
-        if not os.path.exists("outputs"):
-            os.makedirs("outputs")
-
-        if args.out:
-            out_path = args.out
-        else:
-            source_name = os.path.splitext(os.path.basename(image_files[current_image_index]))[0]
-            target_name = os.path.splitext(os.path.basename(args.image))[0]
-            filename = f"processed_{target_name}_with_{source_name}_{int(time.time())}.jpg"
-            out_path = os.path.join("outputs", filename)
-
-        cv2.imwrite(out_path, res)
-        print(f"Saved to: {out_path}")
-
-        print("Press any key to exit.")
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        return
-
-    # Offline Video Mode
-    if args.video:
-        print(f"Processing video: {args.video}")
-        if not os.path.exists(args.video):
-            print("Error: Video file not found.")
-            sys.exit(1)
-
-        if not os.path.exists("outputs"):
-            os.makedirs("outputs")
-
-        if args.out:
-            filename = args.out
-        else:
-            video_name = os.path.splitext(os.path.basename(args.video))[0]
-            source_name = os.path.splitext(os.path.basename(image_files[current_image_index]))[0]
-            filename = f"processed_{video_name}_with_{source_name}_{int(time.time())}.mp4"
-
-        if not os.path.isabs(filename) and not args.out:
-             out_path = os.path.join("outputs", filename)
-        else:
-             out_path = filename
-
-        # If moviepy is available, use it to preserve audio
-        if MOVIEPY_AVAILABLE:
-            print("Using MoviePy for processing with audio.")
-            try:
-                import tempfile
-                import subprocess
-
-                clip = VideoFileClip(args.video)
-                fps = clip.fps
-                width, height = clip.size
-
-                # Create a temporary file for the video without audio
-                temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
-
-                # Process frames manually using the OpenCV writer
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                out_writer = cv2.VideoWriter(temp_video, fourcc, fps, (width, height))
-
-                frame_count = 0
-                total_frames = int(clip.duration * fps)
-                start_time = time.time()
-
-                print(f"Processing {total_frames} frames.")
-
-                # Iterate over the frames
-                for frame_rgb in clip.iter_frames():
-                    # MoviePy uses RGB, OpenCV uses BGR
-                    frame_rgb = np.array(frame_rgb)
-                    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-
-                    # Detect and swap faces
-                    faces = swapper._detect_faces_downscale(frame_bgr, scale=0.5)
-                    try:
-                        res_bgr = swapper._swap_worker(frame_bgr, faces, swapper.source_face)
-                    except Exception:
-                        res_bgr = frame_bgr
-
-                    out_writer.write(res_bgr)
-
-                    frame_count += 1
-                    if frame_count % 10 == 0:
-                        elapsed = time.time() - start_time
-                        fps_proc = frame_count / elapsed if elapsed > 0 else 0
-                        progress = (frame_count / total_frames) * 100 if total_frames > 0 else 0
-                        print(f"\rProcessing: {progress:.1f}% | FPS: {fps_proc:.2f} | Frame: {frame_count}/{total_frames}", end="")
-
-                print()  # New line
-                out_writer.release()
-
-                # Merge the processed video with the original audio using ffmpeg
-                print("Merging with the original audio.")
-                try:
-                    subprocess.run([
-                        'ffmpeg', '-y', '-i', temp_video, '-i', args.video,
-                        '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0',
-                        out_path
-                    ], check=True, capture_output=True)
-                    print(f"Done. Saved to: {out_path}")
-                except subprocess.CalledProcessError:
-                    # If ffmpeg fails, use the video without audio
-                    print("Warning: ffmpeg failed. Saving without audio.")
-                    import shutil
-                    shutil.move(temp_video, out_path)
-                    print(f"Saved without audio to: {out_path}")
-                except FileNotFoundError:
-                    print("Warning: ffmpeg not found. Saving without audio.")
-                    import shutil
-                    shutil.move(temp_video, out_path)
-                    print(f"Saved without audio to: {out_path}")
-                finally:
-                    # Clean up the temporary file if it still exists
-                    if os.path.exists(temp_video) and temp_video != out_path:
-                        os.remove(temp_video)
-
-                clip.close()
-                return
-            except Exception as e:
-                print(f"MoviePy error: {e}")
-                print("Falling back to OpenCV (no audio).")
+    if args.detect_interval < 1:
+        parser.error("--detect-interval must be at least 1")
+    if not 0.0 <= args.enhance_blend <= 1.0:
+        parser.error("--enhance-blend must be between 0 and 1")
+    return args
 
 
-        # Fallback to OpenCV (no audio)
-        cap = cv2.VideoCapture(args.video)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+def find_source_images(source):
+    """Lists the images in the source image's folder (for 'n'/'p' switching) and returns the source's index."""
+    source = os.path.abspath(source)
+    folder = os.path.dirname(source)
+    image_files = sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                         if f.lower().endswith(IMAGE_EXTENSIONS))
+    keys = [os.path.normcase(f) for f in image_files]
+    if os.path.normcase(source) in keys:
+        return image_files, keys.index(os.path.normcase(source))
+    # Source with an unlisted extension: keep it in the list anyway
+    image_files.append(source)
+    return image_files, len(image_files) - 1
 
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
-        print(f"Saving to: {out_path} (NO AUDIO)")
 
-        frame_count = 0
-        start_time = time.time()
+def build_output_path(custom_path, target_path, source_path, ext):
+    """Uses --out if given, otherwise outputs/processed_<target>_with_<source>_<timestamp><ext>."""
+    if custom_path:
+        out_path = custom_path
+    else:
+        target_name = os.path.splitext(os.path.basename(target_path))[0]
+        source_name = os.path.splitext(os.path.basename(source_path))[0]
+        out_path = os.path.join(OUTPUTS_DIR, f"processed_{target_name}_with_{source_name}_{int(time.time())}{ext}")
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    return out_path
 
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
 
-            faces = swapper._detect_faces_downscale(frame, scale=0.5)
-            try:
-                res = swapper._swap_worker(frame, faces, swapper.source_face)
-            except Exception as e:
-                res = frame
+def draw_overlay(img, fps, image_name, swap_enabled, swapper, recording):
+    def put(text, y, color):
+        cv2.putText(img, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-            out.write(res)
+    on_off = lambda enabled: ("ON", (0, 255, 0)) if enabled else ("OFF", (0, 0, 255))
+    put(f"FPS: {fps:.2f}", 30, (0, 255, 0))
+    put(f"Img: {image_name}", 60, (255, 255, 0))
+    text, color = on_off(swap_enabled)
+    put(f"Status: {text}", 90, color)
+    text, color = on_off(swapper.enhancement_enabled)
+    put(f"Enhance: {text}", 120, color)
+    put(f"Boost: {swapper.pixel_boost} | Mask: {swapper.face_mask}", 150, (255, 255, 0))
 
-            frame_count += 1
-            if frame_count % 10 == 0:
-                elapsed = time.time() - start_time
-                fps_proc = frame_count / elapsed if elapsed > 0 else 0
-                progress = (frame_count / total_frames) * 100 if total_frames > 0 else 0
-                print(f"\rProcessing: {progress:.1f}% | FPS: {fps_proc:.2f} | Frame: {frame_count}/{total_frames}", end="")
+    # Recording status
+    if recording:
+        cv2.circle(img, (50, 180), 10, (0, 0, 255), -1)
+        cv2.putText(img, "REC", (70, 190), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-        print("\nDone.")
-        cap.release()
-        out.release()
-        cv2.destroyAllWindows()
-        return
 
-    # GIF Mode
-    if args.gif:
-        print(f"Processing GIF: {args.gif}")
-        if not os.path.exists(args.gif):
-            print("Error: GIF file not found.")
-            sys.exit(1)
-
-        if not os.path.exists("outputs"):
-            os.makedirs("outputs")
-
-        if args.out:
-            filename = args.out
-        else:
-            gif_name = os.path.splitext(os.path.basename(args.gif))[0]
-            source_name = os.path.splitext(os.path.basename(image_files[current_image_index]))[0]
-            filename = f"processed_{gif_name}_with_{source_name}_{int(time.time())}.gif"
-
-        if not os.path.isabs(filename) and not args.out:
-             out_path = os.path.join("outputs", filename)
-        else:
-             out_path = filename
-
-        try:
-            import imageio
-
-            if MOVIEPY_AVAILABLE:
-                clip = VideoFileClip(args.gif)
-                # Try to get the FPS; if missing (common in some GIFs), assume 15
-                fps = clip.fps if clip.fps else 15
-
-                frames = []
-                # Frame count estimate
-                total_frames = int(clip.duration * fps) if clip.duration else "Unknown"
-                print(f"Reading GIF.")
-
-                frame_count = 0
-                for frame_rgb in clip.iter_frames():
-                    # MoviePy returns RGB
-                    frame_rgb = np.array(frame_rgb)
-                    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-
-                    # Detect and swap faces
-                    faces = swapper._detect_faces_downscale(frame_bgr, scale=0.5)
-                    try:
-                        res_bgr = swapper._swap_worker(frame_bgr, faces, swapper.source_face)
-                    except Exception:
-                        res_bgr = frame_bgr
-
-                    # Convert back to RGB for the GIF
-                    res_rgb = cv2.cvtColor(res_bgr, cv2.COLOR_BGR2RGB)
-                    frames.append(res_rgb)
-
-                    frame_count += 1
-                    print(f"\rProcessing frame: {frame_count}", end="")
-
-                print("\nSaving GIF.")
-                # Save using imageio
-                imageio.mimsave(out_path, frames, fps=fps, loop=0)
-                print(f"Saved to: {out_path}")
-                clip.close()
-            else:
-                print("Error: MoviePy is required to process GIFs.")
-                sys.exit(1)
-
-        except Exception as e:
-            print(f"Error processing GIF: {e}")
-
-        return
-
-    # Webcam Mode (Real-time)
+def run_webcam(args, swapper, image_files, current_image_index):
     print(f"Starting webcam with {args.camera_fps} FPS requested.")
-    webcam = WebcamStream(fps=args.camera_fps).start()
+    try:
+        webcam = WebcamStream(src=args.camera, width=args.width, height=args.height, fps=args.camera_fps).start()
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    frame_w, frame_h = webcam.size
+    print(f"[Webcam] Resolution: {frame_w}x{frame_h}")
 
     # Initialize the virtual camera if requested
     vcam = None
     if args.virtual_cam:
         try:
             import pyvirtualcam
-            # Try to initialize with the default resolution
-            # (uses the value defined in WebcamStream).
-            vcam = pyvirtualcam.Camera(width=1920, height=1080, fps=args.camera_fps, fmt=pyvirtualcam.PixelFormat.BGR)
+            # Use the resolution the webcam actually delivers
+            vcam = pyvirtualcam.Camera(width=frame_w, height=frame_h, fps=args.camera_fps, fmt=pyvirtualcam.PixelFormat.BGR)
             print(f"[VirtualCam] Virtual camera started: {vcam.device}")
         except ImportError:
             print("Error: 'pyvirtualcam' is not installed. Run: pip install pyvirtualcam")
+            webcam.stop()
             sys.exit(1)
         except Exception as e:
             print(f"Error starting virtual camera: {e}")
@@ -430,7 +133,9 @@ def main():
     print("  'n': Next image")
     print("  'p': Previous image")
     print("  'x': Toggle swap on/off")
-    print("  'e': Toggle face enhancement (GFPGAN) on/off")
+    print("  'e': Toggle face enhancement on/off")
+    print("  'b': Cycle pixel boost (128/256/384/512)")
+    print("  'm': Toggle face mask (box/parser)")
     print("  'r': Start/Stop recording")
     print("  'u': Show/Hide interface (UI)")
 
@@ -440,231 +145,196 @@ def main():
     swap_enabled = True
     show_ui = True
 
-    from collections import deque
     # Buffer to hold pending futures.
     # Size = workers + 1 minimizes latency while keeping the workers busy.
-    # Reads swapper.max_workers, which was added to swapper.py
-    buffer_size = getattr(swapper, 'max_workers', 4) + 1
-    pending_futures = deque(maxlen=buffer_size)
+    buffer_size = swapper.max_workers + 1
+    pending_futures = deque()
     print(f"[Main] Frame buffer size: {buffer_size}")
 
     current_image_name = os.path.basename(image_files[current_image_index])
+    recorder = None
+    last_frame_id = 0
 
-    # Recording state
-    recording = False
-    video_writer = None
-    audio_recorder = None
-    recording_start_time = 0
-    recording_frame_count = 0
-
-    while True:
-        frame = webcam.read()
-        if frame is None:
-            continue
-
-        if swap_enabled:
-            # 1. Submit the frame to the worker pool
-            try:
-                future = swapper.process_frame_async(frame, detect_interval=args.detect_interval)
-                pending_futures.append(future)
-            except Exception as e:
-                print(f"Submit error: {e}")
+    try:
+        while True:
+            # Only process new camera frames (the same frame used to be swapped and counted repeatedly)
+            frame_id, frame = webcam.read(last_frame_id)
+            if frame_id == last_frame_id:
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
                 continue
+            last_frame_id = frame_id
 
-            # 2. Fetch a result if the buffer is full (or just to keep the flow going)
-            # Waits for the oldest frame to be ready.
-            if len(pending_futures) >= buffer_size - 1:
+            if swap_enabled:
+                # 1. Submit the frame to the worker pool
                 try:
-                    # Pop the oldest future and wait for it
+                    pending_futures.append(swapper.process_frame_async(frame, detect_interval=args.detect_interval))
+                except Exception as e:
+                    print(f"Submit error: {e}")
+                    continue
+
+                # 2. Keep filling the pipeline for the first frames, then wait for the oldest frame
+                if len(pending_futures) < buffer_size - 1:
+                    continue
+                try:
                     output = pending_futures.popleft().result()
                 except Exception as e:
                     print(f"Processing error: {e}")
                     output = frame # Fallback on error
             else:
-                # Buffer filling up
-                # Wait a bit to fill the pipeline, or show the raw frame to avoid an initial freeze
-                # Keep filling the buffer for the first frames
-                continue
-        else:
-            # When disabled, clear the buffer so old frames are not shown when re-enabled
-            if pending_futures:
+                # When disabled, clear the buffer so old frames are not shown when re-enabled
                 pending_futures.clear()
-            output = frame
+                output = frame
 
-        # Send to the virtual camera
-        if vcam:
-            try:
-                # Make sure the frame size matches what the virtual camera expects
-                if output.shape[1] != vcam.width or output.shape[0] != vcam.height:
-                    output_vcam = cv2.resize(output, (vcam.width, vcam.height))
-                    vcam.send(output_vcam)
-                else:
-                    vcam.send(output)
+            # Send to the virtual camera
+            if vcam:
+                try:
+                    if output.shape[1] != vcam.width or output.shape[0] != vcam.height:
+                        vcam.send(cv2.resize(output, (vcam.width, vcam.height)))
+                    else:
+                        vcam.send(output)
+                except Exception as e:
+                    print(f"Virtual camera error: {e}")
 
-                vcam.sleep_until_next_frame()
-            except Exception as e:
-                print(f"Virtual camera error: {e}")
+            # Recordings never include the UI overlay
+            if recorder:
+                recorder.write(output)
 
-        # FPS calculation
-        fps_frame_count += 1
-        if time.time() - fps_start_time > 1.0:
-            fps = fps_frame_count / (time.time() - fps_start_time)
-            fps_frame_count = 0
-            fps_start_time = time.time()
+            # FPS calculation
+            fps_frame_count += 1
+            if time.time() - fps_start_time > 1.0:
+                fps = fps_frame_count / (time.time() - fps_start_time)
+                fps_frame_count = 0
+                fps_start_time = time.time()
 
-        # UI Overlay
-        if show_ui:
-            cv2.putText(output, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(output, f"Img: {current_image_name}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-
-            status_color = (0, 255, 0) if swap_enabled else (0, 0, 255)
-            status_text = "ON" if swap_enabled else "OFF"
-            cv2.putText(output, f"Status: {status_text}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
-
-            # Enhancer status
-            enh_enabled = getattr(swapper, 'enhancement_enabled', False)
-            enh_color = (0, 255, 0) if enh_enabled else (0, 0, 255)
-            enh_text = "ON" if enh_enabled else "OFF"
-            cv2.putText(output, f"Enhance: {enh_text}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, enh_color, 2)
-
-        # Recording status
-        if recording:
+            # UI Overlay (drawn on a copy so the camera frame itself is never modified)
+            display = output
             if show_ui:
-                cv2.circle(output, (50, 150), 10, (0, 0, 255), -1)
-                cv2.putText(output, "REC", (70, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                display = output.copy()
+                draw_overlay(display, fps, current_image_name, swap_enabled, swapper, recorder is not None)
 
-            if video_writer is None:
-                # Start audio recording
-                audio_recorder = AudioRecorder()
-                audio_recorder.start()
+            cv2.imshow("Deepfake Real-time", display)
 
-                # Create the outputs folder if it does not exist
-                if not os.path.exists("outputs"):
-                    os.makedirs("outputs")
-
-                # Use mp4v for better compatibility with aac audio
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                filename = args.out if args.out else f"output_{int(time.time())}.mp4"
-                # If it is not an absolute path, save to outputs/
-                if not os.path.isabs(filename) and not args.out:
-                     out_path = os.path.join("outputs", filename)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                break
+            elif key in (ord('n'), ord('p')):
+                step = 1 if key == ord('n') else -1
+                current_image_index = (current_image_index + step) % len(image_files)
+                new_image = image_files[current_image_index]
+                print(f"Switching to: {new_image}")
+                try:
+                    swapper.set_source_image(new_image)
+                    current_image_name = os.path.basename(new_image)
+                    # Clear the buffer to avoid mixing in old faces
+                    pending_futures.clear()
+                except Exception as e:
+                    print(f"Error switching image: {e}")
+            elif key == ord('x'):
+                swap_enabled = not swap_enabled
+                print(f"Face swap: {'Enabled' if swap_enabled else 'Disabled'}")
+            elif key == ord('e'):
+                if swapper.enhancer:
+                    is_enabled = swapper.toggle_enhancer()
+                    print(f"Enhancer: {'Enabled' if is_enabled else 'Disabled'}")
                 else:
-                     out_path = filename
-
-                video_writer = cv2.VideoWriter(out_path, fourcc, 30.0, (output.shape[1], output.shape[0]))
-                print(f"Recording to: {out_path}")
-                recording_start_time = time.time()
-                recording_frame_count = 0
-
-            video_writer.write(output)
-            recording_frame_count += 1
-        elif video_writer:
-            video_writer.release()
-            video_writer = None
-            # Stop audio recording and merge
-            if audio_recorder:
-                print("Processing audio.")
-                temp_audio = audio_recorder.stop()
-
-                if temp_audio and os.path.exists(temp_audio):
-                    print("Merging audio and video.")
-                    # Build a name for the temporary video file
-                    temp_video = out_path.replace(".mp4", "_temp.mp4")
-                    if temp_video == out_path:
-                        temp_video = out_path + "_temp.mp4"
-
+                    print("Enhancer not available.")
+            elif key == ord('b'):
+                sizes = PIXEL_BOOST_SIZES
+                swapper.pixel_boost = sizes[(sizes.index(swapper.pixel_boost) + 1) % len(sizes)]
+                print(f"Pixel boost: {swapper.pixel_boost}")
+            elif key == ord('m'):
+                if swapper.parser is None:
+                    print("Face parser not available.")
+                else:
+                    swapper.face_mask = 'parser' if swapper.face_mask == 'box' else 'box'
+                    print(f"Face mask: {swapper.face_mask}")
+            elif key == ord('r'):
+                if recorder:
+                    print("Recording: Stopped")
+                    recorder.stop()
+                    recorder = None
+                else:
+                    print("Recording: Started")
+                    out_path = args.out or os.path.join(OUTPUTS_DIR, f"output_{int(time.time())}.mp4")
+                    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
                     try:
-                        if os.path.exists(out_path):
-                            # Rename the original video to temp
-                            # If the temp file already exists, remove it first
-                            if os.path.exists(temp_video):
-                                os.remove(temp_video)
-
-                            os.rename(out_path, temp_video)
-
-                            # Compute the real FPS
-                            elapsed_recording = time.time() - recording_start_time
-                            actual_fps = recording_frame_count / elapsed_recording if elapsed_recording > 0 else 30.0
-                            print(f"Actual recording FPS: {actual_fps:.2f}")
-
-                            # Merge using ffmpeg, re-encoding to fix the FPS
-                            import subprocess
-                            subprocess.run([
-                                'ffmpeg', '-y',
-                                '-r', f'{actual_fps:.2f}',
-                                '-i', temp_video,
-                                '-i', temp_audio,
-                                '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
-                                '-c:a', 'aac',
-                                '-map', '0:v:0', '-map', '1:a:0',
-                                out_path
-                            ], check=True, capture_output=True)
-
-                            print(f"Recording finished with audio: {out_path}")
-
-                            # Clean up temporary files
-                            if os.path.exists(temp_video):
-                                os.remove(temp_video)
-                            if os.path.exists(temp_audio):
-                                os.remove(temp_audio)
-                        else:
-                            print("Error: Video file not found for merging.")
+                        recorder = Recorder(out_path, (output.shape[1], output.shape[0]))
                     except Exception as e:
-                        print(f"Error merging audio: {e}")
-                        # Try to restore the original video on failure
-                        if os.path.exists(temp_video) and not os.path.exists(out_path):
-                            os.rename(temp_video, out_path)
-                else:
-                    print("Audio not recorded or error while saving.")
+                        print(f"Error starting recording: {e}")
+            elif key == ord('u'):
+                show_ui = not show_ui
+                print(f"Interface: {'Visible' if show_ui else 'Hidden'}")
+    finally:
+        # Finish an ongoing recording instead of losing it (and hanging on its audio thread)
+        if recorder:
+            recorder.stop()
+        webcam.stop()
+        if vcam:
+            vcam.close()
+        cv2.destroyAllWindows()
 
-                audio_recorder = None
 
-        cv2.imshow("Deepfake Real-time", output)
+def main():
+    args = parse_args()
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            break
-        elif key == ord('n'):
-            current_image_index = (current_image_index + 1) % len(image_files)
-            new_image = image_files[current_image_index]
-            print(f"Switching to: {new_image}")
-            try:
-                swapper.set_source_image(new_image)
-                current_image_name = os.path.basename(new_image)
-                # Clear the buffer to avoid mixing in old faces
-                pending_futures.clear()
-            except Exception as e:
-                print(f"Error switching image: {e}")
-        elif key == ord('p'):
-            current_image_index = (current_image_index - 1) % len(image_files)
-            new_image = image_files[current_image_index]
-            print(f"Switching to: {new_image}")
-            try:
-                swapper.set_source_image(new_image)
-                current_image_name = os.path.basename(new_image)
-                pending_futures.clear()
-            except Exception as e:
-                print(f"Error switching image: {e}")
-        elif key == ord('x'):
-            swap_enabled = not swap_enabled
-            print(f"Face swap: {'Enabled' if swap_enabled else 'Disabled'}")
-        elif key == ord('e'):
-            if hasattr(swapper, 'toggle_enhancer'):
-                is_enabled = swapper.toggle_enhancer()
-                print(f"Enhancer: {'Enabled' if is_enabled else 'Disabled'}")
+    if not os.path.isfile(args.source):
+        print(f"Error: Source image not found at {args.source}")
+        sys.exit(1)
+    image_files, current_image_index = find_source_images(args.source)
+    source_path = image_files[current_image_index]
+
+    offline = bool(args.image or args.video or args.gif)
+    det_size = args.det_size or (640 if offline else 320)
+
+    print(f"Available images: {len(image_files)}")
+    print("Initializing.")
+    try:
+        swapper = FaceSwapper(args.model, det_size=(det_size, det_size), max_workers=args.max_workers,
+                              pixel_boost=args.pixel_boost, face_mask=args.face_mask,
+                              enhancer_model=args.enhancer_model, enhance_blend=args.enhance_blend)
+        swapper.set_source_image(source_path)
+        if args.enhance:
+            if swapper.enhancer:
+                swapper.enhancement_enabled = True
+                print("Enhancer enabled by default.")
             else:
-                print("Enhancer not available.")
-        elif key == ord('r'):
-            recording = not recording
-            print(f"Recording: {'Started' if recording else 'Stopped'}")
-        elif key == ord('u'):
-            show_ui = not show_ui
-            print(f"Interface: {'Visible' if show_ui else 'Hidden'}")
+                print("Warning: --enhance ignored, the enhancer could not be loaded.")
+    except Exception as e:
+        print(f"Error initializing swapper: {e}")
+        sys.exit(1)
 
-    webcam.stop()
-    if vcam:
-        vcam.close()
-    cv2.destroyAllWindows()
+    if not offline:
+        run_webcam(args, swapper, image_files, current_image_index)
+        return
+
+    target_path = args.image or args.video or args.gif
+    if not os.path.isfile(target_path):
+        print(f"Error: Target file not found: {target_path}")
+        sys.exit(1)
+    if args.out and os.path.normcase(os.path.abspath(args.out)) == os.path.normcase(os.path.abspath(target_path)):
+        print("Error: --out must be different from the input file.")
+        sys.exit(1)
+
+    try:
+        if args.image:
+            # Static Image Mode
+            print(f"Processing single image: {args.image}")
+            ext = os.path.splitext(args.image)[1].lower()
+            out_path = build_output_path(args.out, args.image, source_path, ext if ext in IMAGE_EXTENSIONS else ".jpg")
+            process_image(swapper, args.image, out_path)
+        elif args.video:
+            # Offline Video Mode
+            print(f"Processing video: {args.video}")
+            process_video(swapper, args.video, build_output_path(args.out, args.video, source_path, ".mp4"))
+        else:
+            # GIF Mode
+            print(f"Processing GIF: {args.gif}")
+            process_gif(swapper, args.gif, build_output_path(args.out, args.gif, source_path, ".gif"))
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

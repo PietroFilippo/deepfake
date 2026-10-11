@@ -5,7 +5,6 @@ onnxruntime-gpu
 onnxconverter_common
 polygraphy
 pyvirtualcam
-moviepy
 pyaudio
-imageio
+pillow
 # tensorrt: Install manually as described in README.md (requires NVIDIA login)
