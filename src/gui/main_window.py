@@ -70,6 +70,7 @@ class Bridge(QObject):
     source_set = Signal(str, bool, str)
     file_progress = Signal(int, int)
     file_done = Signal(str)
+    recording_failed = Signal()
 
 
 class VideoView(QWidget):
@@ -140,6 +141,7 @@ class MainWindow(QWidget):
         self._loading_model = False
         self._file_job = None
         self._cancel_file = False
+        self._recording = False
         self._last_frame_number = 0
         self._status_time = 0.0
 
@@ -157,6 +159,7 @@ class MainWindow(QWidget):
         self.bridge.source_set.connect(self._on_source_set)
         self.bridge.file_progress.connect(self._on_file_progress)
         self.bridge.file_done.connect(self._on_file_done)
+        self.bridge.recording_failed.connect(self._on_recording_failed)
 
         self._add_shortcuts()
         self.timer = QTimer(self)
@@ -219,7 +222,8 @@ class MainWindow(QWidget):
     def _on_swapper_ready(self, swapper):
         self.swapper = swapper
         s = self.settings
-        self.pipeline = LivePipeline(swapper, on_status=self.bridge.status.emit)
+        self.pipeline = LivePipeline(swapper, on_status=self.bridge.status.emit,
+                                     on_recording_failed=self.bridge.recording_failed.emit)
         self.pipeline.detect_interval = s.detect_interval
         self.pipeline.start()
         self.pipeline.open_camera(s.camera_index, *s.resolution_size(), s.camera_fps)
@@ -700,7 +704,9 @@ class MainWindow(QWidget):
     def toggle_recording(self):
         if not self.pipeline:
             return
-        if self.pipeline.recording:
+        # Own flag: the pipeline applies the request a frame later
+        self._recording = not self._recording
+        if not self._recording:
             self.pipeline.stop_recording()
             self.record_button.setText("Start recording  (R)")
         else:
@@ -708,6 +714,10 @@ class MainWindow(QWidget):
             path = os.path.join(self.settings.outputs_dir, f"output_{int(time.time())}.mp4")
             self.pipeline.start_recording(path)
             self.record_button.setText("Stop recording  (R)")
+
+    def _on_recording_failed(self):
+        self._recording = False
+        self.record_button.setText("Start recording  (R)")
 
     # ------------------------------------------------------------------ files
 
@@ -867,7 +877,7 @@ class MainWindow(QWidget):
             lines.append(("Tab: settings", QColor(170, 170, 180)))
         recording = bool(self.pipeline and self.pipeline.recording)
         if recording != self.video.recording:
-            self.record_button.setText("Stop recording  (R)" if recording else "Start recording  (R)")
+            self.record_button.setText("Stop recording  (R)" if self._recording else "Start recording  (R)")
         self.video.recording = recording
         # Status messages fade out after a while
         if self.video.status and time.time() - self._status_time > 8 and not self._file_job and not self._loading_model:
@@ -878,6 +888,12 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event):
         self.settings.save()
+        if self._file_job:
+            # Let the file job stop cleanly (a cancelled video is still finalized)
+            self._cancel_file = True
+            self._set_status("Stopping file processing...")
+            QApplication.processEvents()
+            self._file_job.join(timeout=30)
         if self.pipeline:
             if self.pipeline.recording:
                 self._set_status("Saving recording...")

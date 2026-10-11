@@ -14,9 +14,10 @@ from ..recorder import Recorder
 
 
 class LivePipeline:
-    def __init__(self, swapper, on_status=print):
+    def __init__(self, swapper, on_status=print, on_recording_failed=lambda: None):
         self.swapper = swapper
         self.on_status = on_status
+        self.on_recording_failed = on_recording_failed
         self.detect_interval = 1
         self.swap_enabled = True
 
@@ -63,7 +64,8 @@ class LivePipeline:
 
     def start_recording(self, out_path):
         def apply():
-            self._recording_path = out_path  # the recorder is created with the next frame's size
+            if self.recorder is None:
+                self._recording_path = out_path  # the recorder is created with the next frame's size
         self._commands.put(apply)
 
     def stop_recording(self):
@@ -133,13 +135,14 @@ class LivePipeline:
             threading.Thread(target=finish, daemon=False).start()
 
     def _record(self, frame):
-        if self._recording_path:
+        if self._recording_path and self.recorder is None:
             path, self._recording_path = self._recording_path, None
             try:
                 self.recorder = Recorder(path, (frame.shape[1], frame.shape[0]))
                 self.on_status(f"Recording to {path}")
             except Exception as e:
                 self.on_status(f"Error starting recording: {e}")
+                self.on_recording_failed()
         if self.recorder:
             self.recorder.write(frame)
 
