@@ -14,10 +14,11 @@ from ..recorder import Recorder
 
 
 class LivePipeline:
-    def __init__(self, swapper, on_status=print, on_recording_stopped=lambda: None):
+    def __init__(self, swapper, on_status=print, on_recording_stopped=lambda session: None):
         self.swapper = swapper
         self.on_status = on_status
-        self.on_recording_stopped = on_recording_stopped  # called when a recording ends by itself
+        # Called with the recording's session number when a recording ends by itself
+        self.on_recording_stopped = on_recording_stopped
         self.detect_interval = 1
         self.swap_enabled = True
 
@@ -32,7 +33,9 @@ class LivePipeline:
         self.vcam_wanted = False
         self.vcam_fps = 30
         self.recorder = None
-        self._recording_path = None
+        self._recorder_session = 0
+        self._recording_path = None  # (path, session) waiting for the next frame
+        self._pending = deque()
         self._shrink_pending = False
         self.fps = 0.0
 
@@ -63,10 +66,11 @@ class LivePipeline:
                 self._close_vcam()
         self._commands.put(apply)
 
-    def start_recording(self, out_path):
+    def start_recording(self, out_path, session=0):
         def apply():
             if self.recorder is None:
-                self._recording_path = out_path  # the recorder is created with the next frame's size
+                # The recorder is created with the next frame's size
+                self._recording_path = (out_path, session)
         self._commands.put(apply)
 
     def stop_recording(self):
@@ -92,8 +96,13 @@ class LivePipeline:
     def _open_camera(self, index, width, height, fps):
         if self.recorder or self._recording_path:
             # A recording has a fixed frame size: finish it before the camera changes
+            session = self._recording_path[1] if self._recording_path else self._recorder_session
             self._stop_recording()
-            self.on_recording_stopped()
+            self.on_recording_stopped(session)
+        # Frames from the previous camera (maybe another size) and its faces are no longer valid
+        self._pending.clear()
+        self.swapper.last_faces = []
+        self.swapper.tracker.reset()
         if self.webcam:
             self.webcam.stop()
             self.webcam = None
@@ -148,18 +157,19 @@ class LivePipeline:
 
     def _record(self, frame):
         if self._recording_path and self.recorder is None:
-            path, self._recording_path = self._recording_path, None
+            (path, session), self._recording_path = self._recording_path, None
             try:
                 self.recorder = Recorder(path, (frame.shape[1], frame.shape[0]))
+                self._recorder_session = session
                 self.on_status(f"Recording to {path}")
             except Exception as e:
                 self.on_status(f"Error starting recording: {e}")
-                self.on_recording_stopped()
+                self.on_recording_stopped(session)
         if self.recorder:
             self.recorder.write(frame)
 
     def _run(self):
-        pending = deque()
+        pending = self._pending
         last_frame_id = 0
         frame_number = 0
         fps_count, fps_start = 0, time.time()

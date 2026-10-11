@@ -57,7 +57,10 @@ class Settings:
             value = data.get(field.name)
             default = getattr(settings, field.name)
             if isinstance(default, float) and isinstance(value, int) and not isinstance(value, bool):
-                value = float(value)
+                try:
+                    value = float(value)
+                except OverflowError:
+                    continue
             # Ignore missing or wrongly typed values (e.g. from a hand-edited file)
             if type(value) is type(default):
                 setattr(settings, field.name, value)

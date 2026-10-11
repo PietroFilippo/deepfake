@@ -70,7 +70,7 @@ class Bridge(QObject):
     source_set = Signal(str, bool, str)
     file_progress = Signal(int, int)
     file_done = Signal(str)
-    recording_stopped = Signal()
+    recording_stopped = Signal(int)
     shutdown_done = Signal()
 
 
@@ -143,6 +143,7 @@ class MainWindow(QWidget):
         self._file_job = None
         self._cancel_file = False
         self._recording = False
+        self._recording_session = 0
         self._closing = False
         self._closed = False
         self._source_lock = threading.Lock()
@@ -720,7 +721,7 @@ class MainWindow(QWidget):
         self.video.update()
 
     def toggle_recording(self):
-        if not self.pipeline:
+        if not self.pipeline or self._closing:
             return
         # Own flag: the pipeline applies the request a frame later
         self._recording = not self._recording
@@ -730,17 +731,20 @@ class MainWindow(QWidget):
         else:
             os.makedirs(self.settings.outputs_dir, exist_ok=True)
             path = os.path.join(self.settings.outputs_dir, f"output_{int(time.time())}.mp4")
-            self.pipeline.start_recording(path)
+            self._recording_session += 1
+            self.pipeline.start_recording(path, self._recording_session)
             self.record_button.setText("Stop recording  (R)")
 
-    def _on_recording_stopped(self):
-        self._recording = False
-        self.record_button.setText("Start recording  (R)")
+    def _on_recording_stopped(self, session):
+        # Ignore notices about an older recording (a newer one may already have been started)
+        if session == self._recording_session:
+            self._recording = False
+            self.record_button.setText("Start recording  (R)")
 
     # ------------------------------------------------------------------ files
 
     def _process_file(self):
-        if not self.swapper or self._file_job:
+        if not self.swapper or self._file_job or self._closing:
             return
         media = " ".join("*" + e for e in IMAGE_EXTENSIONS + VIDEO_EXTENSIONS + ('.gif',))
         path, _ = QFileDialog.getOpenFileName(self, "Image, video or GIF to process", self.settings.faces_dir,
@@ -750,7 +754,7 @@ class MainWindow(QWidget):
 
     def process_file(self, path):
         """Swaps the faces in an image, video or GIF in the background; the result goes to the outputs folder."""
-        if not self.swapper or self._file_job:
+        if not self.swapper or self._file_job or self._closing:
             return
         ext = os.path.splitext(path)[1].lower()
         if ext == '.gif':
@@ -795,7 +799,7 @@ class MainWindow(QWidget):
         self._file_job = None
         self.file_progress.hide()
         self.cancel_button.hide()
-        self.process_button.setEnabled(True)
+        self.process_button.setEnabled(not self._closing)
         self._set_status(message)
 
     def _cancel_file_job(self):

@@ -10,6 +10,7 @@ import math
 
 import numpy as np
 from insightface.app.common import Face
+from scipy.optimize import linear_sum_assignment
 
 
 class OneEuroFilter:
@@ -71,14 +72,17 @@ class FaceTracker:
         kpss = [np.asarray(face.kps, dtype=np.float64) for face in faces]
         sizes = [float(face.bbox[2] - face.bbox[0]) for face in faces]
 
-        # One-to-one matching, closest pairs first (enough for the few faces in a frame)
-        pairs = sorted((np.linalg.norm(kps.mean(axis=0) - tr['center']), i, j)
-                       for i, kps in enumerate(kpss) for j, tr in enumerate(live))
+        # One-to-one matching: as many faces as possible keep their track (within half a face size
+        # of it), then the smallest total distance
         assigned, used = {}, set()
-        for distance, i, j in pairs:
-            if i not in assigned and j not in used and distance < 0.5 * sizes[i]:
-                assigned[i] = live[j]
-                used.add(j)
+        if kpss and live:
+            distance = np.array([[np.linalg.norm(kps.mean(axis=0) - tr['center']) for tr in live] for kps in kpss])
+            gate = 0.5 * np.array(sizes)[:, None]
+            cost = np.where(distance < gate, distance, 1e9)
+            for i, j in zip(*linear_sum_assignment(cost)):
+                if cost[i, j] < 1e9:
+                    assigned[i] = live[j]
+                    used.add(j)
 
         smoothed = []
         for i, face in enumerate(faces):

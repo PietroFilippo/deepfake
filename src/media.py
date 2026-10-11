@@ -107,9 +107,9 @@ def process_video(swapper, video_path, out_path, pixel_boost=None, progress=None
                # yuv420p (needed for compatibility) requires even dimensions
                '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
                '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
-               '-c:a', 'aac', '-b:a', '192k',
-               # Ends with the video: a cancelled export doesn't keep the rest of the audio
-               '-shortest',
+               # The video decides the length: shorter audio is padded with silence, longer audio
+               # (e.g. after a cancelled export) is cut
+               '-c:a', 'aac', '-b:a', '192k', '-af', 'apad', '-shortest',
                out_path]
         ffmpeg = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=ffmpeg_log)
         print(f"Processing {total_frames} frames.")
@@ -178,8 +178,8 @@ def process_video(swapper, video_path, out_path, pixel_boost=None, progress=None
             # The last frame lasts until the end of the stream (one frame if the length is unknown)
             end_ms = (duration_ms - first_ms) if duration_ms else pending_ms + frame_interval_ms
             emit(pending, pending_ms, max(written + 1, math.ceil(end_ms / frame_interval_ms - 0.5)))
-    except BrokenPipeError:
-        pass  # ffmpeg exited early, its error is reported below
+    except OSError:
+        pass  # ffmpeg exited early (BrokenPipeError, or EINVAL on Windows); its error is reported below
     finally:
         print()  # New line
         cap.release()
@@ -189,7 +189,7 @@ def process_video(swapper, video_path, out_path, pixel_boost=None, progress=None
         if ffmpeg:
             try:
                 ffmpeg.stdin.close()
-            except BrokenPipeError:
+            except OSError:
                 pass
             ffmpeg.wait()
             if ffmpeg.returncode != 0:
