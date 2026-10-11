@@ -1,321 +1,320 @@
-# Deepfake em Tempo Real com Webcam e em Vídeos/Imagens
+# Real-Time Deepfake for Webcam, Videos, and Images
 
-Aplicação de face swapping em tempo real usando webcam, em vídeos e em imagens estáticas, com aceleração GPU via TensorRT e CUDA.
+Face swapping application that works in real time on a webcam feed, as well as on videos and static images, with GPU acceleration via TensorRT and CUDA.
 
-## Características
+## Features
 
-- **Performance otimizada**: Usa TensorRT para inferência acelerada em GPU
-- **Processamento assíncrono**: Pipeline multi-threaded com buffer de frames
-- **Detecção inteligente**: Face detection com downscaling periódico
-- **Suporte a múltiplos providers**: TensorRT → CUDA → CPU (fallback automático)
-- **Múltiplos modos de entrada**: Webcam em tempo real, vídeos, GIFs ou imagens estáticas
-- **Preservação de áudio**: Mantém áudio original ao processar vídeos
-- **Sistema de gravação**: Grave a saída processada em tempo real
+- **Optimized performance**: Uses TensorRT for accelerated GPU inference
+- **Asynchronous processing**: Multi-threaded pipeline with a frame buffer
+- **Smart detection**: Face detection with periodic downscaling
+- **Multiple provider support**: TensorRT → CUDA → CPU (automatic fallback)
+- **Multiple input modes**: Real-time webcam, videos, GIFs, or static images
+- **Audio preservation**: Keeps the original audio when processing videos
+- **Recording system**: Record the processed output in real time
 
-## Pré-requisitos
+## Prerequisites
 
 ### Hardware
-- GPU NVIDIA com suporte CUDA
-- Webcam (opcional)
-- Microfone para gravação de áudio (opcional)
+- NVIDIA GPU with CUDA support
+- Webcam (optional)
+- Microphone for audio recording (optional)
 
 ### Software
 - **Python 3.11**
-- **FFmpeg** (Adicionado ao PATH do sistema) - Essencial para áudio ([Download](https://www.ffmpeg.org/download.html))
-- **CUDA 12.4+** (Adicionado ao PATH do sistema) ([Download](https://developer.nvidia.com/cuda-downloads))
-- **TensorRT 10.4.0** (Adicionado ao PATH do sistema) ([Download](https://developer.nvidia.com/tensorrt)) - Requer login NVIDIA
-  - Extrair para um dos locais padrão:
-    - `C:\Program Files\TensorRT-10.4.0.26\` (recomendado)
+- **FFmpeg** (Added to the system PATH) - Essential for audio ([Download](https://www.ffmpeg.org/download.html))
+- **CUDA 12.4+** (Added to the system PATH) ([Download](https://developer.nvidia.com/cuda-downloads))
+- **TensorRT 10.4.0** (Added to the system PATH) ([Download](https://developer.nvidia.com/tensorrt)) - Requires an NVIDIA login
+  - Extract it to one of the default locations:
+    - `C:\Program Files\TensorRT-10.4.0.26\` (recommended)
     - `C:\Program Files\NVIDIA GPU Computing Toolkit\TensorRT\`
     - `C:\TensorRT\`
-  - Ou defina variável de ambiente: `TENSORRT_DIR=<seu_caminho_tensorrt>`
+  - Or set the environment variable: `TENSORRT_DIR=<your_tensorrt_path>`
 
-## Instalação
+## Installation
 
-### 1. Clone o repositório
+### 1. Clone the repository
 ```bash
-git clone <repositorio>
+git clone <repository>
 cd deepfake
 ```
 
-### 2. Crie o ambiente virtual
+### 2. Create the virtual environment
 ```bash
 python -m venv venv
 venv\Scripts\activate
 ```
 
-### 3. Instale as dependências
+### 3. Install the dependencies
 ```bash
 scripts\install_dependencies.bat
 ```
 
-Ou manualmente:
+Or manually:
 ```bash
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 ```
 
-### 4. Instale o TensorRT após de ter baixado e extraido a pasta
+### 4. Install TensorRT after downloading and extracting the folder
 ```bash
 pip install "C:\Program Files\TensorRT-10.4.0.26\python\tensorrt_lean-10.4.0-cp311-none-win_amd64.whl"
 ```
 
-### 5. Baixe os modelos necessários por fora
-Coloque os arquivos `GFPGANv1.4.onnx` e `inswapper_128.onnx` ou sua versão 16fp `inswapper_128_fp16.onnx` caso já tenha na pasta `models/`.
+### 5. Download the required models separately
+Place the `GFPGANv1.4.onnx` and `inswapper_128.onnx` files (or its FP16 version, `inswapper_128_fp16.onnx`, if you already have it) in the `models/` folder.
 
-### 6. Verifique o ambiente
+### 6. Verify the environment
 ```bash
 python tools/check_environment.py
 ```
 
-Você deve ver: **AMBIENTE CONFIGURADO CORRETAMENTE**
+You should see: **ENVIRONMENT CONFIGURED CORRECTLY**
 
-## Estrutura do Projeto
+## Project Structure
 
 ```
 deepfake/
-├── src/                  # Módulos principais
-│   ├── camera.py          # Captura de webcam/vídeo com threading
-│   ├── swapper.py         # Face detection e swapping
-│   └── utils.py           # Utilitários compartilhados (DLL setup, providers)
-├── tools/                # Utilitários Python
-│   ├── check_environment.py   # Diagnóstico completo
-│   ├── benchmark_model.py     # Benchmark de inferência
-│   ├── convert_fp16_v2.py     # Conversão para FP16
-│   └── fix_trt_dlls.py        # Copia DLLs do TensorRT
-│   └── inspect_model.py       # Inspeção de modelos ONNX
-├── scripts/              # Scripts de automação
+├── src/                       # Core modules
+│   ├── camera.py              # Threaded webcam/video capture
+│   ├── swapper.py             # Face detection and swapping
+│   └── utils.py               # Shared utilities (DLL setup, providers)
+├── tools/                     # Python utilities
+│   ├── check_environment.py   # Full diagnostics
+│   ├── benchmark_model.py     # Inference benchmark
+│   ├── convert_fp16_v2.py     # FP16 conversion
+│   ├── fix_trt_dlls.py        # Copies TensorRT DLLs
+│   └── inspect_model.py       # ONNX model inspection
+├── scripts/                   # Automation scripts
 │   ├── install_dependencies.bat
 │   └── run.bat
-├── models/               # Modelos ONNX (inswapper)
-├── images/               # Imagens de origem
-├── outputs/              # Vídeos e imagens processados
-├── main.py              # Aplicação principal
-└── requirements.txt     # Dependências Python
+├── models/                    # ONNX models (inswapper)
+├── images/                    # Source images
+├── outputs/                   # Processed videos and images
+├── main.py                    # Main application
+└── requirements.txt           # Python dependencies
 ```
 
-## Uso
+## Usage
 
-### Modos de Operação
+### Operating Modes
 
-#### 1. Webcam em Tempo Real (Padrão)
+#### 1. Real-Time Webcam (Default)
 ```bash
-python main.py --source images/minha_foto.jpg
+python main.py --source images/my_photo.jpg
 ```
 
-#### 2. Processamento de Vídeo (Offline)
-Processa um vídeo frame-by-frame e salva com áudio preservado:
+#### 2. Video Processing (Offline)
+Processes a video frame by frame and saves it with the audio preserved:
 ```bash
-python main.py --source images/minha_foto.jpg --video images/meu_video.mp4
+python main.py --source images/my_photo.jpg --video images/my_video.mp4
 ```
-- Processamento offline para qualidade máxima
-- Áudio original preservado (via MoviePy/FFmpeg)
-- Barra de progresso em tempo real
-- Salva automaticamente em `outputs/` com nome único
+- Offline processing for maximum quality
+- Original audio preserved (via MoviePy/FFmpeg)
+- Real-time progress bar
+- Automatically saved to `outputs/` with a unique name
 
-#### 3. Processamento de Imagem Estática
-Troca rosto em uma imagem:
+#### 3. Static Image Processing
+Swaps the face in an image:
 ```bash
-python main.py --source images/minha_foto.jpg --image images/alvo.jpg
+python main.py --source images/my_photo.jpg --image images/target.jpg
 ```
-- Processa uma única imagem
-- Salva automaticamente em `outputs/`
-- Exibe resultado na tela
-- Salva automaticamente em `outputs/`
+- Processes a single image
+- Automatically saved to `outputs/`
+- Displays the result on screen
 
-#### 4. Processamento de GIF
-Troca rosto em um arquivo GIF animado:
+#### 4. GIF Processing
+Swaps the face in an animated GIF file:
 ```bash
-python main.py --source images/minha_foto.jpg --gif images/animacao.gif
+python main.py --source images/my_photo.jpg --gif images/animation.gif
 ```
-- Processa frame a frame
-- Mantém a velocidade (FPS) original
-- Salva como novo GIF em `outputs/`
+- Processes frame by frame
+- Keeps the original speed (FPS)
+- Saved as a new GIF in `outputs/`
 
-### Usando script auxiliar
+### Using the helper script
 ```bash
-scripts\run.bat images/minha_foto.jpg
+scripts\run.bat images/my_photo.jpg
 ```
 
-### Opções
+### Options
 ```bash
-python main.py --source <imagem> [opções]
+python main.py --source <image> [options]
 ```
 
-#### Argumentos Principais
-- `--source`: Imagem do rosto que será aplicado (obrigatório)
-- `--model`: Caminho para modelo inswapper (padrão: `models/inswapper_128_fp16.onnx`)
-- `--video`: Caminho para vídeo de entrada (processamento offline)
-- `--image`: Caminho para imagem de entrada (processamento estático)
-- `--gif`: Caminho para GIF de entrada (processamento animado)
-- `--out`: Caminho customizado para arquivo de saída
-- `--enhance`: Ativa GFPGAN por padrão ao iniciar (Pode ser usado com vídeos e imagens)
+#### Main Arguments
+- `--source`: Image of the face to apply (required)
+- `--model`: Path to the inswapper model (default: `models/inswapper_128_fp16.onnx`)
+- `--video`: Path to the input video (offline processing)
+- `--image`: Path to the input image (static processing)
+- `--gif`: Path to the input GIF (animated processing)
+- `--out`: Custom path for the output file
+- `--enhance`: Enables GFPGAN by default on startup (can be used with videos and images)
 
-#### Argumentos de Performance
-- `--max-workers`: Número de threads paralelas (Padrão: auto).
-  - Menor (2-3) = Menor latência (menos delay), FPS menor.
-  - Maior (5-6) = Maior FPS, maior latência (mais delay).
-- `--detect-interval`: Intervalo de quadros para detecção de rosto (Padrão: 5).
-  - Aumentar (ex: 10) reduz uso de CPU e pode aumentar FPS da GPU.
-- `--camera-fps`: Solicita FPS específico para a webcam (Padrão: 30).
-- `--virtual-cam`: Ativa saída para OBS Virtual Camera (Útil para Discord, Zoom, etc).
+#### Performance Arguments
+- `--max-workers`: Number of parallel threads (default: auto).
+  - Lower (2-3) = Lower latency (less delay), lower FPS.
+  - Higher (5-6) = Higher FPS, higher latency (more delay).
+- `--detect-interval`: Frame interval for face detection (default: 5).
+  - Increasing it (e.g. 10) reduces CPU usage and can increase GPU FPS.
+- `--camera-fps`: Requests a specific FPS from the webcam (default: 30).
+- `--virtual-cam`: Enables output to OBS Virtual Camera (useful for Discord, Zoom, etc.).
 
-### Controles (Modo Webcam)
-- **q**: Sair da aplicação
-- **n**: Trocar para próxima imagem da pasta `images/`
-- **p**: Trocar para imagem anterior da pasta `images/`
-- **x**: Ativar/Desativar troca de rosto (mostra webcam original)
-- **e**: Ativar/Desativar "melhoria" de rosto (GFPGAN)
-- **r**: Iniciar/Parar gravação (salva em `outputs/`)
-- **u**: Mostrar/Ocultar interface (FPS, status, indicador REC)
+### Controls (Webcam Mode)
+- **q**: Quit the application
+- **n**: Switch to the next image in the `images/` folder
+- **p**: Switch to the previous image in the `images/` folder
+- **x**: Toggle face swapping on/off (shows the original webcam feed)
+- **e**: Toggle face "enhancement" on/off (GFPGAN)
+- **r**: Start/stop recording (saved to `outputs/`)
+- **u**: Show/hide the UI overlay (FPS, status, REC indicator)
 
-## "Melhoria" de Rosto (Face Enhancer)
+## Face "Enhancement" (Face Enhancer)
 
-O projeto suporta melhoria de rosto usando o modelo **GFPGAN** para corrigir rostos borrados em resoluções maiores. Isso aumenta a resolução, mas deixa os rostos mais "plásticos". Qualidade bem pior no escuro, mas pode ser melhor de perto, varia de acordo com a qualidade da webcam.
+The project supports face enhancement using the **GFPGAN** model to fix blurry faces at higher resolutions. It increases the resolution, but makes faces look more "plastic". Quality is much worse in the dark, but it can look better up close; it depends on your webcam's quality.
 
-- **Modelo**: `models/GFPGANv1.4.onnx` (Baixado externamente igual os outros modelos)
-- **Ativação**: Pressione a tecla `e` durante a execução.
-- **Performance**: Esse enhancer roda em **FP32** (Full Precision) no TensorRT para evitar artefatos visuais. Isso consome mais recursos que o swapper (FP16), então espere uma queda de FPS quando ativado. 
+- **Model**: `models/GFPGANv1.4.onnx` (downloaded separately, like the other models)
+- **Activation**: Press the `e` key while the app is running.
+- **Performance**: This enhancer runs in **FP32** (Full Precision) on TensorRT to avoid visual artifacts. It uses more resources than the swapper (FP16), so expect an FPS drop when it's enabled.
 
-## Câmera Virtual (Discord/Zoom/Teams)
+## Virtual Camera (Discord/Zoom/Teams)
 
-Para usar o deepfake em chamadas de vídeo:
+To use the deepfake in video calls:
 
-1.  Certifique-se de ter o **OBS Studio** instalado (ele instala o driver da câmera virtual).
-2.  Execute com a flag `--virtual-cam`:
+1.  Make sure you have **OBS Studio** installed (it installs the virtual camera driver).
+2.  Run with the `--virtual-cam` flag:
     ```bash
     python main.py --source images/face.jpg --max-workers 4 --detect-interval 5 --virtual-cam
     ```
-3.  No Discord/Zoom/Teams, selecione **OBS Virtual Camera** como sua câmera.
-    
-> **Nota:** O script suporta 1080p (1920x1080). Se desejar alterar a resolução padrão, edite `src/camera.py` (linhas 12 e 13) e `main.py` (linha 42).
+3.  In Discord/Zoom/Teams, select **OBS Virtual Camera** as your camera.
 
-## Gravação e Saída
+> **Note:** The script supports 1080p (1920x1080). If you want to change the default resolution, edit `src/camera.py` (lines 12 and 13) and `main.py` (line 42).
 
-### Sistema de Gravação
-No modo webcam, você pode gravar a saída processada:
-1. Pressione **'r'** para iniciar a gravação
-2. Um indicador vermelho "REC" aparecerá na tela
-3. Pressione **'r'** novamente para parar
-4. O áudio do microfone será gravado e sincronizado automaticamente
-5. O vídeo é salvo em `outputs/output_<timestamp>.mp4` (com áudio)
+## Recording and Output
 
-### Arquivos de Saída
-Todos os arquivos processados são salvos em `outputs/` com nomes únicos:
-- **Vídeos**: `processed_<video>_with_<source>_<timestamp>.mp4`
-- **Imagens**: `processed_<imagem>_with_<source>_<timestamp>.jpg`
-- **Gravações**: `output_<timestamp>.mp4`
+### Recording System
+In webcam mode, you can record the processed output:
+1. Press **'r'** to start recording
+2. A red "REC" indicator will appear on screen
+3. Press **'r'** again to stop
+4. Microphone audio is recorded and synced automatically
+5. The video is saved to `outputs/output_<timestamp>.mp4` (with audio)
 
-### Preservação de Áudio
-Ao processar vídeos com `--video`, o áudio original é preservado automaticamente:
-- Requer `moviepy` instalado
-- Usa codec AAC para áudio de alta qualidade
+### Output Files
+All processed files are saved to `outputs/` with unique names:
+- **Videos**: `processed_<video>_with_<source>_<timestamp>.mp4`
+- **Images**: `processed_<image>_with_<source>_<timestamp>.jpg`
+- **Recordings**: `output_<timestamp>.mp4`
 
-## Otimização de Performance
+### Audio Preservation
+When processing videos with `--video`, the original audio is preserved automatically:
+- Requires `moviepy` to be installed
+- Uses the AAC codec for high-quality audio
 
-Encontre o equilíbrio ideal para seu hardware:
+## Performance Optimization
 
-### 1. Modo Baixa Latência (Recomendado pra interação)
-Prioriza resposta instantânea. FPS será menor (~12-15), mas o vídeo "acompanha" seus movimentos.
+Find the ideal balance for your hardware:
+
+### 1. Low Latency Mode (Recommended for interaction)
+Prioritizes instant response. FPS will be lower (~12-15), but the video "keeps up" with your movements.
 ```bash
 python main.py --source images/c.jpg --max-workers 2
 ```
 
-### 2. Modo Alto FPS (Recomendado pra gravação)
-Prioriza fluidez. FPS será maior (~25-30), mas haverá um pequeno atraso (delay).
+### 2. High FPS Mode (Recommended for recording)
+Prioritizes smoothness. FPS will be higher (~25-30), but there will be a small delay.
 ```bash
 python main.py --source images/c.jpg --max-workers 5 --camera-fps 60
 ```
 
-### 3. Modo Equilibrado
-Um meio termo entre fluidez e resposta.
+### 3. Balanced Mode
+A middle ground between smoothness and responsiveness.
 ```bash
 python main.py --source images/c.jpg --max-workers 3 --detect-interval 8
 ```
 
-### 4. Modo que Funcionou Bem pra Mim
+### 4. Settings That Worked Well for Me
 ```bash
 python main.py --source images/c.jpg --max-workers 4 --detect-interval 5
 ```
 
-## Scripts Utilitários
+## Utility Scripts
 
-### Verificação de ambiente
+### Environment check
 ```bash
 python tools/check_environment.py
 ```
-Verifica TensorRT, CUDA, ONNX Runtime, PyTorch e todas as dependências.
+Checks TensorRT, CUDA, ONNX Runtime, PyTorch, and all dependencies.
 
-### Benchmark de modelo
+### Model benchmark
 ```bash
 python tools/benchmark_model.py
 ```
-Mede tempo médio de inferência e FPS estimado.
+Measures average inference time and estimated FPS.
 
-### Conversão para FP16
+### FP16 conversion
 ```bash
 python tools/convert_fp16_v2.py
 ```
-Converte modelos ONNX de FP32 para FP16 (~2x mais rápido).
+Converts ONNX models from FP32 to FP16 (~2x faster).
 
-### Fix de DLLs do TensorRT
+### TensorRT DLL fix
 ```bash
 python tools/fix_trt_dlls.py
 ```
-Copia DLLs do TensorRT para ONNX Runtime (raramente necessário com auto-detecção).
+Copies TensorRT DLLs to ONNX Runtime (rarely needed thanks to auto-detection).
 
-### Inspeção de modelos ONNX
+### ONNX model inspection
 ```bash
-python tools/inspect_model.py --model models/modelo_exemplo.onnx
+python tools/inspect_model.py --model models/example_model.onnx
 ```
-Inspeiona a assinatura do modelo ONNX e salva em `model_info.txt`. Útil para verificar a compatibilidade do modelo com o sistema e para a implementação de novos modelos.
+Inspects the ONNX model's signature and saves it to `model_info.txt`. Useful for checking whether a model is compatible with the system and for implementing support for new models.
 
 ## Troubleshooting
 
-### Erro: `nvinfer_10.dll not found`
-**Opção 1 - Instalação em local padrão:**
-Instale TensorRT em um dos locais padrão:
+### Error: `nvinfer_10.dll not found`
+**Option 1 - Install to a default location:**
+Install TensorRT in one of the default locations:
 - `C:\Program Files\TensorRT-10.4.0.26\TensorRT-10.4.0.26\`
 - `C:\Program Files\NVIDIA GPU Computing Toolkit\TensorRT\`
 - `C:\TensorRT\`
 
-**Opção 2 - Local customizado:**
-Defina a variável de ambiente `TENSORRT_DIR`:
+**Option 2 - Custom location:**
+Set the `TENSORRT_DIR` environment variable:
 ```bash
-setx TENSORRT_DIR "C:\seu\caminho\TensorRT-10.4.0.26"
+setx TENSORRT_DIR "C:\your\path\TensorRT-10.4.0.26"
 ```
 
-**Opção 3 - Fix manual:**
-1. Execute: `python tools/fix_trt_dlls.py`
-2. Ou adicione ao PATH: `C:\seu\caminho\TensorRT\lib`
+**Option 3 - Manual fix:**
+1. Run: `python tools/fix_trt_dlls.py`
+2. Or add this to your PATH: `C:\your\path\TensorRT\lib`
 
-### Erro: `zlibwapi.dll not found`
-O `zlibwapi.dll` vem com PyTorch. Reinstale:
+### Error: `zlibwapi.dll not found`
+`zlibwapi.dll` comes with PyTorch. Reinstall it:
 ```bash
 pip install --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu124
 ```
 
-### FPS baixo
-1. Use modelo FP16: `python tools/convert_fp16_v2.py`
-2. Reduza resolução de detecção: `det_size=(256, 256)` em `src/swapper.py`
-3. Aumente intervalo de detecção: `detect_interval=10` em `main.py`
-4. Verifique se TensorRT está sendo usado: `python tools/check_environment.py`
+### Low FPS
+1. Use the FP16 model: `python tools/convert_fp16_v2.py`
+2. Reduce the detection resolution: `det_size=(256, 256)` in `src/swapper.py`
+3. Increase the detection interval: `detect_interval=10` in `main.py`
+4. Check that TensorRT is being used: `python tools/check_environment.py`
 
-### Providers não disponíveis
-Execute `python tools/check_environment.py` para diagnóstico completo.
-- Se falta `CUDAExecutionProvider`: Reinstale `onnxruntime-gpu`
-- Se falta `TensorrtExecutionProvider`: Verifique instalação do TensorRT ou configure `TENSORRT_DIR`
+### Providers not available
+Run `python tools/check_environment.py` for a full diagnosis.
+- If `CUDAExecutionProvider` is missing: Reinstall `onnxruntime-gpu`
+- If `TensorrtExecutionProvider` is missing: Check your TensorRT installation or set `TENSORRT_DIR`
 
-## Performance Esperada
+## Expected Performance
 
-Testes feitos com RTX 4060 Ti + TensorRT FP16:
-- **Detecção**: ~15-20ms por frame (em 50% downscale)
-- **Swapping**: ~5-10ms por rosto
-- **FPS alvo**: 15-30 FPS (depende de número de rostos e configurações)
+Tested with an RTX 4060 Ti + TensorRT FP16:
+- **Detection**: ~15-20ms per frame (at 50% downscale)
+- **Swapping**: ~5-10ms per face
+- **Target FPS**: 15-30 FPS (depends on the number of faces and settings)
 
-## Notas
+## Notes
 
-- Primeira execução é lenta (TensorRT compila engines e cria cache em `trt_cache/`)
-- Execuções subsequentes são muito mais rápidas
-- Cache TensorRT é específico para GPU
-- Modelos FP16 são ~2x mais rápidos que FP32
+- The first run is slow (TensorRT compiles engines and creates a cache in `trt_cache/`)
+- Subsequent runs are much faster
+- The TensorRT cache is GPU-specific
+- FP16 models are ~2x faster than FP32

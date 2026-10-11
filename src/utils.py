@@ -1,22 +1,22 @@
 """
-Utilitários compartilhados para o projeto deepfake.
-Centraliza funcionalidades comuns utilizadas em múltiplos módulos.
+Shared utilities for the deepfake project.
+Centralizes common functionality used across multiple modules.
 """
 import os
 
 
 def find_tensorrt_lib_path():
     """
-    Detecta automaticamente o caminho da biblioteca TensorRT a partir de variável de ambiente ou locais comuns.
+    Automatically detects the TensorRT library path from an environment variable or common locations.
     
     Returns:
-        str or None: Caminho para o diretório lib do TensorRT se encontrado, None caso contrário
+        str or None: Path to the TensorRT lib directory if found, None otherwise
     """
     trt_lib = None
     if 'TENSORRT_DIR' in os.environ:
         trt_lib = os.path.join(os.environ['TENSORRT_DIR'], 'lib')
     else:
-        # Tenta caminhos comuns (Windows)
+        # Try common paths (Windows)
         common_paths = [
             r"C:\Program Files\TensorRT-10.4.0.26\TensorRT-10.4.0.26\lib",
             r"C:\Program Files\NVIDIA GPU Computing Toolkit\TensorRT\lib",
@@ -32,16 +32,16 @@ def find_tensorrt_lib_path():
 
 def setup_dll_directories():
     """
-    Adiciona diretórios DLL necessários ao caminho de busca para Windows.
-    Isso inclui caminhos das bibliotecas ONNX Runtime, TensorRT e PyTorch.
+    Adds the required DLL directories to the Windows search path.
+    This includes the ONNX Runtime, TensorRT and PyTorch library paths.
     
-    Deve ser chamado na inicialização do módulo antes de carregar modelos.
+    Must be called at module initialization, before loading models.
     """
     if os.name != 'nt':
-        return  # Necessário apenas para Windows
+        return  # Only needed on Windows
     
     try:
-        # Adiciona diretório capi do ONNX Runtime
+        # Add the ONNX Runtime capi directory
         try:
             import insightface
             ort_capi = os.path.join(
@@ -54,12 +54,12 @@ def setup_dll_directories():
         except ImportError:
             pass
         
-        # Adiciona diretório lib do TensorRT
+        # Add the TensorRT lib directory
         trt_lib = find_tensorrt_lib_path()
         if trt_lib:
             os.add_dll_directory(trt_lib)
         
-        # Adiciona diretório lib do PyTorch (para zlibwapi.dll e outras dependências)
+        # Add the PyTorch lib directory (for zlibwapi.dll and other dependencies)
         try:
             import torch
             torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
@@ -68,18 +68,18 @@ def setup_dll_directories():
         except ImportError:
             pass
         
-        print("Diretórios DLL adicionados ao caminho de busca.")
+        print("DLL directories added to the search path.")
     except Exception as e:
-        print(f"Aviso: Falha ao adicionar diretórios DLL: {e}")
+        print(f"Warning: Failed to add DLL directories: {e}")
 
 
 def get_default_providers():
     """
-    Retorna a configuração padrão dos provedores de execução do ONNX Runtime.
-    Prioriza TensorRT > CUDA > CPU.
+    Returns the default ONNX Runtime execution provider configuration.
+    Prioritizes TensorRT > CUDA > CPU.
     
     Returns:
-        list: Lista de provedores com suas configurações
+        list: List of providers with their settings
     """
     return [
         ('TensorrtExecutionProvider', {

@@ -1,11 +1,11 @@
 @echo off
-echo Instalando PyTorch com suporte CUDA...
+echo Installing PyTorch with CUDA support...
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 echo.
-echo Instalando demais dependencias...
+echo Installing remaining dependencies...
 pip install -r ../requirements.txt
 
 echo.
-echo Instalacao concluida!
+echo Installation complete!
 pause

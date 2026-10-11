@@ -1,3 +1,3 @@
-# Este arquivo mantém a pasta outputs/ no repositório
-# Diretório que são salvos os outputs do programa (Gravação, Vídeos, Imagens e GIFs)
-# Todos os vídeos, imagens e gifs são ignorados pelo .gitignore
+# This file keeps the outputs/ folder in the repository
+# Directory where the program saves its outputs (recordings, videos, images and GIFs)
+# All videos, images and GIFs are ignored by .gitignore

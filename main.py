@@ -15,20 +15,20 @@ try:
     AUDIO_AVAILABLE = True
 except ImportError:
     AUDIO_AVAILABLE = False
-    print("Aviso: 'pyaudio' não encontrado. Gravação de áudio desativada.")
+    print("Warning: 'pyaudio' not found. Audio recording disabled.")
 
-# Tenta importar moviepy para processamento de vídeo com áudio
+# Try to import moviepy for video processing with audio
 try:
     from moviepy import VideoFileClip
     MOVIEPY_AVAILABLE = True
 except ImportError as e:
     MOVIEPY_AVAILABLE = False
-    print(f"Aviso: 'moviepy' não pôde ser importado: {e}")
-    print("Processamento de vídeo será sem áudio.")
+    print(f"Warning: 'moviepy' could not be imported: {e}")
+    print("Video processing will have no audio.")
 except Exception as e:
     MOVIEPY_AVAILABLE = False
-    print(f"Aviso: Erro inesperado ao importar 'moviepy': {e}")
-    print("Processamento de vídeo será sem áudio.")
+    print(f"Warning: Unexpected error while importing 'moviepy': {e}")
+    print("Video processing will have no audio.")
 
 class AudioRecorder:
     def __init__(self):
@@ -41,7 +41,7 @@ class AudioRecorder:
         self.audio = None
         self.stream = None
         self.audio_frames = []
-        
+
         if not AUDIO_AVAILABLE:
             self.open = False
             return
@@ -54,13 +54,13 @@ class AudioRecorder:
                                           input=True,
                                           frames_per_buffer=self.frames_per_buffer)
         except Exception as e:
-            print(f"Erro ao inicializar áudio: {e}")
+            print(f"Error initializing audio: {e}")
             self.open = False
 
     def record(self):
         if not self.open or not self.stream:
             return
-            
+
         self.stream.start_stream()
         while self.open:
             try:
@@ -76,7 +76,7 @@ class AudioRecorder:
             self.stream.close()
         if self.audio:
             self.audio.terminate()
-        
+
         if self.audio_frames:
             waveFile = wave.open(self.audio_filename, 'wb')
             waveFile.setnchannels(self.channels)
@@ -93,86 +93,86 @@ class AudioRecorder:
             audio_thread.start()
 
 def main():
-    parser = argparse.ArgumentParser(description="Deepfake em Tempo Real")
-    parser.add_argument("--source", help="Caminho para imagem de origem inicial", required=True)
-    parser.add_argument("--model", help="Caminho para modelo inswapper", default="models/inswapper_128_fp16.onnx")
-    parser.add_argument("--max-workers", type=int, default=None, help="Número máximo de threads (workers). Menos = menos latência, Mais = mais FPS.")
-    parser.add_argument("--detect-interval", type=int, default=5, help="Intervalo de quadros para detecção de rosto. Maior = mais FPS.")
-    parser.add_argument("--camera-fps", type=int, default=30, help="FPS desejado para a webcam.")
-    parser.add_argument("--virtual-cam", action="store_true", help="Ativa saída para câmera virtual (OBS Virtual Camera).")
-    parser.add_argument("--video", help="Caminho para arquivo de vídeo de destino")
-    parser.add_argument("--image", help="Caminho para imagem de destino")
-    parser.add_argument("--gif", help="Caminho para arquivo GIF de destino")
-    parser.add_argument("--out", help="Caminho para salvar o vídeo gravado/processado")
-    parser.add_argument("--enhance", action="store_true", help="Ativa melhoria de rosto (GFPGAN) por padrão")
+    parser = argparse.ArgumentParser(description="Real-time Deepfake")
+    parser.add_argument("--source", help="Path to the initial source image", required=True)
+    parser.add_argument("--model", help="Path to the inswapper model", default="models/inswapper_128_fp16.onnx")
+    parser.add_argument("--max-workers", type=int, default=None, help="Maximum number of threads (workers). Fewer = less latency, more = more FPS.")
+    parser.add_argument("--detect-interval", type=int, default=5, help="Frame interval for face detection. Higher = more FPS.")
+    parser.add_argument("--camera-fps", type=int, default=30, help="Desired webcam FPS.")
+    parser.add_argument("--virtual-cam", action="store_true", help="Enable output to a virtual camera (OBS Virtual Camera).")
+    parser.add_argument("--video", help="Path to the target video file")
+    parser.add_argument("--image", help="Path to the target image")
+    parser.add_argument("--gif", help="Path to the target GIF file")
+    parser.add_argument("--out", help="Path to save the recorded/processed video")
+    parser.add_argument("--enhance", action="store_true", help="Enable face enhancement (GFPGAN) by default")
     args = parser.parse_args()
 
-    # Procura imagens no diretório
+    # Look for images in the directory
     image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp']
     image_files = []
     images_dir = os.path.dirname(os.path.abspath(args.source))
-    if not images_dir: # Lida com caso onde source é apenas um nome de arquivo
+    if not images_dir: # Handles the case where source is just a file name
         images_dir = "images"
-    
+
     for ext in image_extensions:
         image_files.extend(glob.glob(os.path.join(images_dir, ext)))
-    
-    # Ordena arquivos para ordem consistente
+
+    # Sort files for a consistent order
     image_files.sort()
-    
+
     if not image_files:
-        print(f"Aviso: Nenhuma imagem encontrada em {images_dir}. A troca dinâmica não funcionará.")
+        print(f"Warning: No images found in {images_dir}. Dynamic switching will not work.")
         image_files = [args.source]
 
-    # Encontra índice inicial
+    # Find the starting index
     try:
         current_image_index = image_files.index(os.path.abspath(args.source))
     except ValueError:
-        # Tenta correspondência de caminho relativo
+        # Try matching the relative path
         try:
              current_image_index = image_files.index(os.path.join(images_dir, os.path.basename(args.source)))
         except ValueError:
-             # Apenas adiciona se não encontrado (por exemplo, fora da pasta)
+             # Just append it if not found (e.g. outside the folder)
              if os.path.exists(args.source):
                  image_files.append(args.source)
                  current_image_index = len(image_files) - 1
              else:
-                 print(f"Erro: Imagem de origem não encontrada em {args.source}")
+                 print(f"Error: Source image not found at {args.source}")
                  sys.exit(1)
 
-    print(f"Imagens disponíveis: {len(image_files)}")
-    print("Inicializando.")
+    print(f"Available images: {len(image_files)}")
+    print("Initializing.")
     try:
         swapper = FaceSwapper(args.model, max_workers=args.max_workers)
         swapper.set_source_image(image_files[current_image_index])
         if args.enhance:
             swapper.enhancement_enabled = True
-            print("Enhancer ativado por padrão.")
+            print("Enhancer enabled by default.")
     except Exception as e:
-        print(f"Erro ao inicializar swapper: {e}")
+        print(f"Error initializing swapper: {e}")
         sys.exit(1)
 
-    # Modo de Imagem Estática
+    # Static Image Mode
     if args.image:
-        print(f"Processando imagem única: {args.image}")
+        print(f"Processing single image: {args.image}")
         target_img = cv2.imread(args.image)
         if target_img is None:
-            print("Erro: Não foi possível ler a imagem de destino.")
+            print("Error: Could not read the target image.")
             sys.exit(1)
-        
-        # Detecta rostos na imagem alvo
+
+        # Detect faces in the target image
         faces = swapper.app.get(target_img)
         res = target_img.copy()
-        
-        # Realiza a troca
+
+        # Perform the swap
         try:
             res = swapper._swap_worker(target_img, faces, swapper.source_face)
         except Exception as e:
-            print(f"Erro na troca: {e}")
-            
+            print(f"Swap error: {e}")
+
         cv2.imshow("Deepfake Image", res)
-        
-        # Lógica de auto-save
+
+        # Auto-save logic
         if not os.path.exists("outputs"):
             os.makedirs("outputs")
 
@@ -185,23 +185,23 @@ def main():
             out_path = os.path.join("outputs", filename)
 
         cv2.imwrite(out_path, res)
-        print(f"Salvo em: {out_path}")
-            
-        print("Pressione qualquer tecla para sair.")
+        print(f"Saved to: {out_path}")
+
+        print("Press any key to exit.")
         cv2.waitKey(0)
         cv2.destroyAllWindows()
         return
 
-    # Modo Vídeo Offline
+    # Offline Video Mode
     if args.video:
-        print(f"Processando vídeo: {args.video}")
+        print(f"Processing video: {args.video}")
         if not os.path.exists(args.video):
-            print("Erro: Arquivo de vídeo não encontrado.")
+            print("Error: Video file not found.")
             sys.exit(1)
-            
+
         if not os.path.exists("outputs"):
             os.makedirs("outputs")
-            
+
         if args.out:
             filename = args.out
         else:
@@ -214,137 +214,137 @@ def main():
         else:
              out_path = filename
 
-        # Se moviepy estiver disponível, usa ele para preservar áudio
+        # If moviepy is available, use it to preserve audio
         if MOVIEPY_AVAILABLE:
-            print("Usando MoviePy para processamento com áudio.")
+            print("Using MoviePy for processing with audio.")
             try:
                 import tempfile
                 import subprocess
-                
+
                 clip = VideoFileClip(args.video)
                 fps = clip.fps
                 width, height = clip.size
-                
-                # Cria arquivo temporário para vídeo sem áudio
+
+                # Create a temporary file for the video without audio
                 temp_video = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False).name
-                
-                # Processa frames manualmente usando OpenCV writer
+
+                # Process frames manually using the OpenCV writer
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 out_writer = cv2.VideoWriter(temp_video, fourcc, fps, (width, height))
-                
+
                 frame_count = 0
                 total_frames = int(clip.duration * fps)
                 start_time = time.time()
-                
-                print(f"Processando {total_frames} frames.")
-                
-                # Itera sobre os frames
+
+                print(f"Processing {total_frames} frames.")
+
+                # Iterate over the frames
                 for frame_rgb in clip.iter_frames():
-                    # MoviePy usa RGB, OpenCV usa BGR
+                    # MoviePy uses RGB, OpenCV uses BGR
                     frame_rgb = np.array(frame_rgb)
                     frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-                    
-                    # Detecta e troca faces
+
+                    # Detect and swap faces
                     faces = swapper._detect_faces_downscale(frame_bgr, scale=0.5)
                     try:
                         res_bgr = swapper._swap_worker(frame_bgr, faces, swapper.source_face)
                     except Exception:
                         res_bgr = frame_bgr
-                    
+
                     out_writer.write(res_bgr)
-                    
+
                     frame_count += 1
                     if frame_count % 10 == 0:
                         elapsed = time.time() - start_time
                         fps_proc = frame_count / elapsed if elapsed > 0 else 0
                         progress = (frame_count / total_frames) * 100 if total_frames > 0 else 0
-                        print(f"\rProcessando: {progress:.1f}% | FPS: {fps_proc:.2f} | Frame: {frame_count}/{total_frames}", end="")
-                
-                print()  # Nova linha
+                        print(f"\rProcessing: {progress:.1f}% | FPS: {fps_proc:.2f} | Frame: {frame_count}/{total_frames}", end="")
+
+                print()  # New line
                 out_writer.release()
-                
-                # Combina vídeo processado com áudio original usando ffmpeg
-                print("Combinando com áudio original.")
+
+                # Merge the processed video with the original audio using ffmpeg
+                print("Merging with the original audio.")
                 try:
                     subprocess.run([
                         'ffmpeg', '-y', '-i', temp_video, '-i', args.video,
                         '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0',
                         out_path
                     ], check=True, capture_output=True)
-                    print(f"Concluído. Salvo em: {out_path}")
+                    print(f"Done. Saved to: {out_path}")
                 except subprocess.CalledProcessError:
-                    # Se ffmpeg falhar, usa o vídeo sem áudio
-                    print("Aviso: ffmpeg falhou. Salvando sem áudio.")
+                    # If ffmpeg fails, use the video without audio
+                    print("Warning: ffmpeg failed. Saving without audio.")
                     import shutil
                     shutil.move(temp_video, out_path)
-                    print(f"Salvo sem áudio em: {out_path}")
+                    print(f"Saved without audio to: {out_path}")
                 except FileNotFoundError:
-                    print("Aviso: ffmpeg não encontrado. Salvando sem áudio.")
+                    print("Warning: ffmpeg not found. Saving without audio.")
                     import shutil
                     shutil.move(temp_video, out_path)
-                    print(f"Salvo sem áudio em: {out_path}")
+                    print(f"Saved without audio to: {out_path}")
                 finally:
-                    # Limpa arquivo temporário se ainda existir
+                    # Clean up the temporary file if it still exists
                     if os.path.exists(temp_video) and temp_video != out_path:
                         os.remove(temp_video)
-                
+
                 clip.close()
                 return
             except Exception as e:
-                print(f"Erro com MoviePy: {e}")
-                print("Tentando fallback para OpenCV (sem áudio).")
+                print(f"MoviePy error: {e}")
+                print("Falling back to OpenCV (no audio).")
 
 
-        # Fallback para OpenCV (Sem áudio)
+        # Fallback to OpenCV (no audio)
         cap = cv2.VideoCapture(args.video)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
+
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
-        print(f"Salvando em: {out_path} (SEM ÁUDIO)")
-        
+        print(f"Saving to: {out_path} (NO AUDIO)")
+
         frame_count = 0
         start_time = time.time()
-        
+
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-            
+
             faces = swapper._detect_faces_downscale(frame, scale=0.5)
             try:
                 res = swapper._swap_worker(frame, faces, swapper.source_face)
             except Exception as e:
                 res = frame
-                
+
             out.write(res)
-            
+
             frame_count += 1
             if frame_count % 10 == 0:
                 elapsed = time.time() - start_time
                 fps_proc = frame_count / elapsed if elapsed > 0 else 0
                 progress = (frame_count / total_frames) * 100 if total_frames > 0 else 0
-                print(f"\rProcessando: {progress:.1f}% | FPS: {fps_proc:.2f} | Frame: {frame_count}/{total_frames}", end="")
-                
-        print("\nConcluído.")
+                print(f"\rProcessing: {progress:.1f}% | FPS: {fps_proc:.2f} | Frame: {frame_count}/{total_frames}", end="")
+
+        print("\nDone.")
         cap.release()
         out.release()
         cv2.destroyAllWindows()
         return
 
-    # Modo GIF
+    # GIF Mode
     if args.gif:
-        print(f"Processando GIF: {args.gif}")
+        print(f"Processing GIF: {args.gif}")
         if not os.path.exists(args.gif):
-            print("Erro: Arquivo GIF não encontrado.")
+            print("Error: GIF file not found.")
             sys.exit(1)
-            
+
         if not os.path.exists("outputs"):
             os.makedirs("outputs")
-            
+
         if args.out:
             filename = args.out
         else:
@@ -359,98 +359,98 @@ def main():
 
         try:
             import imageio
-            
+
             if MOVIEPY_AVAILABLE:
                 clip = VideoFileClip(args.gif)
-                # Tenta obter FPS, se não tiver (comum em alguns GIFs), assume 15
-                fps = clip.fps if clip.fps else 15 
-                
+                # Try to get the FPS; if missing (common in some GIFs), assume 15
+                fps = clip.fps if clip.fps else 15
+
                 frames = []
-                # Estimativa de frames
-                total_frames = int(clip.duration * fps) if clip.duration else "Desconhecido"
-                print(f"Lendo GIF.")
-                
+                # Frame count estimate
+                total_frames = int(clip.duration * fps) if clip.duration else "Unknown"
+                print(f"Reading GIF.")
+
                 frame_count = 0
                 for frame_rgb in clip.iter_frames():
-                    # MoviePy retorna RGB
+                    # MoviePy returns RGB
                     frame_rgb = np.array(frame_rgb)
                     frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-                    
-                    # Detecta e troca faces
+
+                    # Detect and swap faces
                     faces = swapper._detect_faces_downscale(frame_bgr, scale=0.5)
                     try:
                         res_bgr = swapper._swap_worker(frame_bgr, faces, swapper.source_face)
                     except Exception:
                         res_bgr = frame_bgr
-                        
-                    # Converte de volta para RGB para o GIF
+
+                    # Convert back to RGB for the GIF
                     res_rgb = cv2.cvtColor(res_bgr, cv2.COLOR_BGR2RGB)
                     frames.append(res_rgb)
-                    
+
                     frame_count += 1
-                    print(f"\rProcessando frame: {frame_count}", end="")
-                
-                print("\nSalvando GIF.")
-                # Salva usando imageio
+                    print(f"\rProcessing frame: {frame_count}", end="")
+
+                print("\nSaving GIF.")
+                # Save using imageio
                 imageio.mimsave(out_path, frames, fps=fps, loop=0)
-                print(f"Salvo em: {out_path}")
+                print(f"Saved to: {out_path}")
                 clip.close()
             else:
-                print("Erro: MoviePy necessário para processar GIFs.")
+                print("Error: MoviePy is required to process GIFs.")
                 sys.exit(1)
-                
+
         except Exception as e:
-            print(f"Erro ao processar GIF: {e}")
-            
+            print(f"Error processing GIF: {e}")
+
         return
 
-    # Modo Webcam (Real-time)
-    print(f"Iniciando webcam com {args.camera_fps} FPS solicitados.")
+    # Webcam Mode (Real-time)
+    print(f"Starting webcam with {args.camera_fps} FPS requested.")
     webcam = WebcamStream(fps=args.camera_fps).start()
 
-    # Inicializa câmera virtual se solicitado
+    # Initialize the virtual camera if requested
     vcam = None
     if args.virtual_cam:
         try:
             import pyvirtualcam
-            # Tenta inicializar com resolução padrão
-            # é usado o valor que foi definido na WebcamStream.
+            # Try to initialize with the default resolution
+            # (uses the value defined in WebcamStream).
             vcam = pyvirtualcam.Camera(width=1920, height=1080, fps=args.camera_fps, fmt=pyvirtualcam.PixelFormat.BGR)
-            print(f"[VirtualCam] Câmera virtual iniciada: {vcam.device}")
+            print(f"[VirtualCam] Virtual camera started: {vcam.device}")
         except ImportError:
-            print("Erro: 'pyvirtualcam' não instalado. Execute: pip install pyvirtualcam")
+            print("Error: 'pyvirtualcam' is not installed. Run: pip install pyvirtualcam")
             sys.exit(1)
         except Exception as e:
-            print(f"Erro ao iniciar câmera virtual: {e}")
-            print("Certifique-se que o OBS Studio está instalado (ou outro driver de câmera virtual).")
+            print(f"Error starting virtual camera: {e}")
+            print("Make sure OBS Studio is installed (or another virtual camera driver).")
             vcam = None
 
-    print("Controles:")
-    print("  'q': Sair")
-    print("  'n': Próxima imagem")
-    print("  'p': Imagem anterior")
-    print("  'x': Ativar/Desativar troca")
-    print("  'e': Ativar/Desativar melhoria de rosto (GFPGAN)")
-    print("  'r': Iniciar/Parar gravação")
-    print("  'u': Mostrar/Ocultar Interface (UI)")
-    
+    print("Controls:")
+    print("  'q': Quit")
+    print("  'n': Next image")
+    print("  'p': Previous image")
+    print("  'x': Toggle swap on/off")
+    print("  'e': Toggle face enhancement (GFPGAN) on/off")
+    print("  'r': Start/Stop recording")
+    print("  'u': Show/Hide interface (UI)")
+
     fps_start_time = time.time()
     fps_frame_count = 0
     fps = 0
     swap_enabled = True
     show_ui = True
-    
+
     from collections import deque
-    # Buffer para armazenar futures pendentes. 
-    # Tamanho = workers + 1 minimiza latência enquanto mantém workers ocupados.
-    # Acessa swapper.max_workers que foi adicionado ao swapper.py
+    # Buffer to hold pending futures.
+    # Size = workers + 1 minimizes latency while keeping the workers busy.
+    # Reads swapper.max_workers, which was added to swapper.py
     buffer_size = getattr(swapper, 'max_workers', 4) + 1
     pending_futures = deque(maxlen=buffer_size)
-    print(f"[Main] Tamanho do buffer de quadros: {buffer_size}")
-    
+    print(f"[Main] Frame buffer size: {buffer_size}")
+
     current_image_name = os.path.basename(image_files[current_image_index])
 
-    # Estado de gravação
+    # Recording state
     recording = False
     video_writer = None
     audio_recorder = None
@@ -461,51 +461,51 @@ def main():
         frame = webcam.read()
         if frame is None:
             continue
-            
+
         if swap_enabled:
-            # 1. Envia quadro para o pool de workers
+            # 1. Submit the frame to the worker pool
             try:
                 future = swapper.process_frame_async(frame, detect_interval=args.detect_interval)
                 pending_futures.append(future)
             except Exception as e:
-                print(f"Erro de envio: {e}")
+                print(f"Submit error: {e}")
                 continue
 
-            # 2. Recupera resultado se o buffer estiver cheio (ou apenas para manter o fluxo)
-            # Aguarda o quadro mais antigo ficar pronto.
+            # 2. Fetch a result if the buffer is full (or just to keep the flow going)
+            # Waits for the oldest frame to be ready.
             if len(pending_futures) >= buffer_size - 1:
                 try:
-                    # Remove o future mais antigo e aguarda por ele
+                    # Pop the oldest future and wait for it
                     output = pending_futures.popleft().result()
                 except Exception as e:
-                    print(f"Erro de processamento: {e}")
-                    output = frame # Fallback se houver erro
+                    print(f"Processing error: {e}")
+                    output = frame # Fallback on error
             else:
-                # Buffer enchendo
-                # Espera um pouco para encher o pipeline ou mostra quadro bruto para evitar congelamento inicial
-                # Continua enchendo o buffer pelos primeiros quadros
+                # Buffer filling up
+                # Wait a bit to fill the pipeline, or show the raw frame to avoid an initial freeze
+                # Keep filling the buffer for the first frames
                 continue
         else:
-            # Se desativado, limpa o buffer para não mostrar frames antigos ao reativar
+            # When disabled, clear the buffer so old frames are not shown when re-enabled
             if pending_futures:
                 pending_futures.clear()
             output = frame
 
-        # Envia para câmera virtual
+        # Send to the virtual camera
         if vcam:
             try:
-                # Garante que o tamanho do frame corresponde ao esperado pela câmera virtual
+                # Make sure the frame size matches what the virtual camera expects
                 if output.shape[1] != vcam.width or output.shape[0] != vcam.height:
                     output_vcam = cv2.resize(output, (vcam.width, vcam.height))
                     vcam.send(output_vcam)
                 else:
                     vcam.send(output)
-                    
+
                 vcam.sleep_until_next_frame()
             except Exception as e:
-                print(f"Erro na câmera virtual: {e}")
+                print(f"Virtual camera error: {e}")
 
-        # Cálculo de FPS
+        # FPS calculation
         fps_frame_count += 1
         if time.time() - fps_start_time > 1.0:
             fps = fps_frame_count / (time.time() - fps_start_time)
@@ -516,151 +516,151 @@ def main():
         if show_ui:
             cv2.putText(output, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             cv2.putText(output, f"Img: {current_image_name}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-            
+
             status_color = (0, 255, 0) if swap_enabled else (0, 0, 255)
             status_text = "ON" if swap_enabled else "OFF"
             cv2.putText(output, f"Status: {status_text}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
 
-            # Status do enhancer
+            # Enhancer status
             enh_enabled = getattr(swapper, 'enhancement_enabled', False)
             enh_color = (0, 255, 0) if enh_enabled else (0, 0, 255)
             enh_text = "ON" if enh_enabled else "OFF"
             cv2.putText(output, f"Enhance: {enh_text}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, enh_color, 2)
-        
-        # Status de gravação
+
+        # Recording status
         if recording:
             if show_ui:
                 cv2.circle(output, (50, 150), 10, (0, 0, 255), -1)
                 cv2.putText(output, "REC", (70, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            
+
             if video_writer is None:
-                # Inicia gravação de áudio
+                # Start audio recording
                 audio_recorder = AudioRecorder()
                 audio_recorder.start()
 
-                # Cria pasta outputs se não existir
+                # Create the outputs folder if it does not exist
                 if not os.path.exists("outputs"):
                     os.makedirs("outputs")
-                
-                # Usa mp4v para melhor compatibilidade com áudio aac
+
+                # Use mp4v for better compatibility with aac audio
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 filename = args.out if args.out else f"output_{int(time.time())}.mp4"
-                # Se não for caminho absoluto, salva em outputs/
+                # If it is not an absolute path, save to outputs/
                 if not os.path.isabs(filename) and not args.out:
                      out_path = os.path.join("outputs", filename)
                 else:
                      out_path = filename
-                     
+
                 video_writer = cv2.VideoWriter(out_path, fourcc, 30.0, (output.shape[1], output.shape[0]))
-                print(f"Gravando em: {out_path}")
+                print(f"Recording to: {out_path}")
                 recording_start_time = time.time()
                 recording_frame_count = 0
-            
+
             video_writer.write(output)
             recording_frame_count += 1
         elif video_writer:
             video_writer.release()
-            video_writer = None            
-            # Para gravação de áudio e combina
+            video_writer = None
+            # Stop audio recording and merge
             if audio_recorder:
-                print("Processando áudio.")
+                print("Processing audio.")
                 temp_audio = audio_recorder.stop()
-                
+
                 if temp_audio and os.path.exists(temp_audio):
-                    print("Combinando áudio e vídeo.")
-                    # Cria nome para arquivo temporário de vídeo
+                    print("Merging audio and video.")
+                    # Build a name for the temporary video file
                     temp_video = out_path.replace(".mp4", "_temp.mp4")
                     if temp_video == out_path:
                         temp_video = out_path + "_temp.mp4"
-                    
+
                     try:
                         if os.path.exists(out_path):
-                            # Renomeia vídeo original para temp
-                            # Se arquivo temp já existe, remove antes
+                            # Rename the original video to temp
+                            # If the temp file already exists, remove it first
                             if os.path.exists(temp_video):
                                 os.remove(temp_video)
-                                
+
                             os.rename(out_path, temp_video)
-                            
-                            # Calcula FPS real
+
+                            # Compute the real FPS
                             elapsed_recording = time.time() - recording_start_time
                             actual_fps = recording_frame_count / elapsed_recording if elapsed_recording > 0 else 30.0
-                            print(f"FPS real da gravação: {actual_fps:.2f}")
+                            print(f"Actual recording FPS: {actual_fps:.2f}")
 
-                            # Combina usando ffmpeg com re-encode para ajustar FPS
+                            # Merge using ffmpeg, re-encoding to fix the FPS
                             import subprocess
                             subprocess.run([
-                                'ffmpeg', '-y', 
-                                '-r', f'{actual_fps:.2f}', 
-                                '-i', temp_video, 
+                                'ffmpeg', '-y',
+                                '-r', f'{actual_fps:.2f}',
+                                '-i', temp_video,
                                 '-i', temp_audio,
                                 '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
-                                '-c:a', 'aac', 
+                                '-c:a', 'aac',
                                 '-map', '0:v:0', '-map', '1:a:0',
                                 out_path
                             ], check=True, capture_output=True)
-                            
-                            print(f"Gravação concluída com áudio: {out_path}")
-                            
-                            # Limpa arquivos temporários
+
+                            print(f"Recording finished with audio: {out_path}")
+
+                            # Clean up temporary files
                             if os.path.exists(temp_video):
                                 os.remove(temp_video)
                             if os.path.exists(temp_audio):
                                 os.remove(temp_audio)
                         else:
-                            print("Erro: Arquivo de vídeo não encontrado para merge.")
+                            print("Error: Video file not found for merging.")
                     except Exception as e:
-                        print(f"Erro ao combinar áudio: {e}")
-                        # Tenta restaurar vídeo original se falhar
+                        print(f"Error merging audio: {e}")
+                        # Try to restore the original video on failure
                         if os.path.exists(temp_video) and not os.path.exists(out_path):
                             os.rename(temp_video, out_path)
                 else:
-                    print("Áudio não gravado ou erro ao salvar.")
-                
+                    print("Audio not recorded or error while saving.")
+
                 audio_recorder = None
-        
+
         cv2.imshow("Deepfake Real-time", output)
-        
+
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
         elif key == ord('n'):
             current_image_index = (current_image_index + 1) % len(image_files)
             new_image = image_files[current_image_index]
-            print(f"Trocando para: {new_image}")
+            print(f"Switching to: {new_image}")
             try:
                 swapper.set_source_image(new_image)
                 current_image_name = os.path.basename(new_image)
-                # Limpa buffer para evitar mistura de rostos antigos
-                pending_futures.clear() 
+                # Clear the buffer to avoid mixing in old faces
+                pending_futures.clear()
             except Exception as e:
-                print(f"Erro ao trocar imagem: {e}")
+                print(f"Error switching image: {e}")
         elif key == ord('p'):
             current_image_index = (current_image_index - 1) % len(image_files)
             new_image = image_files[current_image_index]
-            print(f"Trocando para: {new_image}")
+            print(f"Switching to: {new_image}")
             try:
                 swapper.set_source_image(new_image)
                 current_image_name = os.path.basename(new_image)
                 pending_futures.clear()
             except Exception as e:
-                print(f"Erro ao trocar imagem: {e}")
+                print(f"Error switching image: {e}")
         elif key == ord('x'):
             swap_enabled = not swap_enabled
-            print(f"Troca de rosto: {'Ativado' if swap_enabled else 'Desativado'}")
+            print(f"Face swap: {'Enabled' if swap_enabled else 'Disabled'}")
         elif key == ord('e'):
             if hasattr(swapper, 'toggle_enhancer'):
                 is_enabled = swapper.toggle_enhancer()
-                print(f"Enhancer: {'Ativado' if is_enabled else 'Desativado'}")
+                print(f"Enhancer: {'Enabled' if is_enabled else 'Disabled'}")
             else:
-                print("Enhancer não disponível.")
+                print("Enhancer not available.")
         elif key == ord('r'):
             recording = not recording
-            print(f"Gravação: {'Iniciada' if recording else 'Parada'}")
+            print(f"Recording: {'Started' if recording else 'Stopped'}")
         elif key == ord('u'):
             show_ui = not show_ui
-            print(f"Interface: {'Visível' if show_ui else 'Oculta'}")
-            
+            print(f"Interface: {'Visible' if show_ui else 'Hidden'}")
+
     webcam.stop()
     if vcam:
         vcam.close()

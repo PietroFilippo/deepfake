@@ -17,57 +17,57 @@ class FaceSwapper:
         self.providers = providers
         self.det_size = det_size
 
-        print(f"[FaceSwapper] Inicializando FaceAnalysis com providers: {self.providers} e det_size: {self.det_size}")
+        print(f"[FaceSwapper] Initializing FaceAnalysis with providers: {self.providers} and det_size: {self.det_size}")
         
-        # Aplicativo de detecção de rostos
+        # Face detection app
         self.app = insightface.app.FaceAnalysis(name='buffalo_l', providers=self.providers)
         self.app.prepare(ctx_id=0, det_size=self.det_size)
 
-        # Modelo de troca de rostos
+        # Face swap model
         if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Modelo não encontrado em {model_path}")
+            raise FileNotFoundError(f"Model not found at {model_path}")
             
         if not os.path.exists('trt_cache'):
             os.makedirs('trt_cache')
             
         self.swapper = insightface.model_zoo.get_model(model_path, providers=self.providers)
         
-        # Inicializa Enhancer (GFPGAN)
+        # Initialize the Enhancer (GFPGAN)
         try:
             self.enhancer = FaceEnhancer()
-            self.enhancement_enabled = False # Desativado por padrão
+            self.enhancement_enabled = False # Disabled by default
         except Exception as e:
-            print(f"[FaceSwapper] Aviso: Não foi possível carregar FaceEnhancer: {e}")
+            print(f"[FaceSwapper] Warning: Could not load FaceEnhancer: {e}")
             self.enhancer = None
             self.enhancement_enabled = False
 
         self.source_face = None
 
-        # Estado para detecção periódica
+        # State for periodic detection
         self.frame_count = 0
         self.last_faces = []
         
-        # Pool de Threads para processamento paralelo
+        # Thread pool for parallel processing
         if max_workers is None:
             cpu_count = os.cpu_count() or 4
             self.max_workers = min(cpu_count, 5)
         else:
             self.max_workers = max_workers
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers)
-        print(f"[FaceSwapper] Inicializado com {self.max_workers} threads de trabalho.")
+        print(f"[FaceSwapper] Initialized with {self.max_workers} worker threads.")
 
     def set_source_image(self, source_img_path):
         img = cv2.imread(source_img_path)
         if img is None:
-            raise ValueError(f"Não foi possível ler a imagem de origem: {source_img_path}")
+            raise ValueError(f"Could not read the source image: {source_img_path}")
 
         faces = self.app.get(img)
         if len(faces) == 0:
-            raise ValueError("Nenhum rosto detectado na imagem de origem")
+            raise ValueError("No face detected in the source image")
 
-        # Usa o maior rosto
+        # Use the largest face
         self.source_face = sorted(faces, key=lambda x: (x.bbox[2] - x.bbox[0])*(x.bbox[3] - x.bbox[1]))[-1]
-        print("[FaceSwapper] Rosto de origem definido")
+        print("[FaceSwapper] Source face set")
 
     def _detect_faces_downscale(self, frame, scale=0.5):
         small = cv2.resize(frame, (0,0), fx=scale, fy=scale)
@@ -88,34 +88,34 @@ class FaceSwapper:
             except Exception:
                 continue
         
-        # Aplica melhoria se ativado e disponível
+        # Apply enhancement if enabled and available
         if self.enhancer and self.enhancement_enabled:
             try:
                 res = self.enhancer.enhance(res, faces)
             except Exception as e:
-                print(f"[FaceSwapper] Erro no enhancer: {e}")
+                print(f"[FaceSwapper] Enhancer error: {e}")
                 
         return res
 
     def process_frame_async(self, frame, detect_interval=5):
         if self.source_face is None:
-            # Retorna um future completo com o quadro original
+            # Return a completed future with the original frame
             future = concurrent.futures.Future()
             future.set_result(frame)
             return future
 
-        # Detecta rostos periodicamente (Síncrono para manter o estado simples)
+        # Detect faces periodically (synchronous to keep the state simple)
         if self.frame_count % detect_interval == 0:
             try:
                 faces = self._detect_faces_downscale(frame, scale=0.5)
                 self.last_faces = faces
             except Exception as e:
-                print(f"Erro de detecção: {e}")
+                print(f"Detection error: {e}")
                 pass
         self.frame_count += 1
 
-        # Envia tarefa de troca para o pool de threads
-        # Copia quadro e rostos para garantir segurança de thread
+        # Submit the swap task to the thread pool
+        # Copy the frame and faces to ensure thread safety
         frame_copy = frame.copy()
         faces_copy = list(self.last_faces) 
         

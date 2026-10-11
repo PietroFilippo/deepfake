@@ -8,4 +8,4 @@ pyvirtualcam
 moviepy
 pyaudio
 imageio
-# tensorrt: Instale manualmente como mencionado no README.md (requer login NVIDIA)
+# tensorrt: Install manually as described in README.md (requires NVIDIA login)

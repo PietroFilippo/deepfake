@@ -2,191 +2,191 @@ import os
 import sys
 import ctypes
 
-# Adiciona raiz do projeto ao caminho para importar de src
+# Add project root to path so src can be imported
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.utils import find_tensorrt_lib_path
 
 def print_section(title):
-    # Imprime um título de seção formatado
+    # Print a formatted section title
     print(f"\n{'='*60}")
     print(f"  {title}")
     print(f"{'='*60}")
 
 def check_python_info():
-    # Verifica as informações do Python
-    print_section("INFORMAÇÕES DO PYTHON")
+    # Check Python info
+    print_section("PYTHON INFO")
     print(f"Python: {sys.version}")
-    print(f"Executável Python: {sys.executable}")
-    print(f"Diretório de trabalho: {os.getcwd()}")
+    print(f"Python executable: {sys.executable}")
+    print(f"Working directory: {os.getcwd()}")
 
 def check_tensorrt():
-    # Verifica a instalação do TensorRT
+    # Check TensorRT installation
     print_section("TENSORRT")
     try:
         import tensorrt as trt
-        print(f"TensorRT versão: {trt.__version__}")
+        print(f"TensorRT version: {trt.__version__}")
         return True
     except ImportError as e:
-        print(f"TensorRT não encontrado: {e}")
+        print(f"TensorRT not found: {e}")
         return False
 
 def check_onnxruntime():
-    # Verifica a instalação do ONNX Runtime
+    # Check ONNX Runtime installation
     print_section("ONNX RUNTIME")
     try:
         import onnxruntime as ort
-        print(f"ONNX Runtime versão: {ort.__version__}")
-        print(f"Providers disponíveis: {ort.get_available_providers()}")
+        print(f"ONNX Runtime version: {ort.__version__}")
+        print(f"Available providers: {ort.get_available_providers()}")
         
         if 'TensorrtExecutionProvider' in ort.get_available_providers():
-            print("TensorRT provider está disponível")
+            print("TensorRT provider is available")
         else:
-            print("TensorRT provider NÃO disponível")
+            print("TensorRT provider NOT available")
             
         if 'CUDAExecutionProvider' in ort.get_available_providers():
-            print("CUDA provider está disponível")
+            print("CUDA provider is available")
         else:
-            print("CUDA provider NÃO disponível - irá usar apenas CPU")
+            print("CUDA provider NOT available - will use CPU only")
         return True
     except ImportError as e:
-        print(f"Não foi possível importar onnxruntime: {e}")
+        print(f"Could not import onnxruntime: {e}")
         return False
 
 def check_pytorch_cuda():
-    # Verifica PyTorch e CUDA
-    print_section("PYTORCH E CUDA")
+    # Check PyTorch and CUDA
+    print_section("PYTORCH AND CUDA")
     try:
         import torch
-        print(f"Versão do PyTorch: {torch.__version__}")
-        print(f"CUDA disponível no PyTorch: {torch.cuda.is_available()}")
+        print(f"PyTorch version: {torch.__version__}")
+        print(f"CUDA available in PyTorch: {torch.cuda.is_available()}")
         if torch.cuda.is_available():
-            print(f"Versão do CUDA (PyTorch): {torch.version.cuda}")
+            print(f"CUDA version (PyTorch): {torch.version.cuda}")
             print(f"GPU: {torch.cuda.get_device_name(0)}")
         else:
-            print("CUDA não está disponível no PyTorch")
+            print("CUDA is not available in PyTorch")
         return torch.cuda.is_available()
     except ImportError as e:
-        print(f"Não foi possível importar torch: {e}")
+        print(f"Could not import torch: {e}")
         return False
 
 def check_cuda_paths():
-    # Verifica diretórios CUDA no PATH
-    print_section("DIRETÓRIOS CUDA NO PATH")
+    # Check CUDA directories in PATH
+    print_section("CUDA DIRECTORIES IN PATH")
     path_dirs = os.environ.get('PATH', '').split(';')
     cuda_paths = [p for p in path_dirs if 'cuda' in p.lower()]
     
     if cuda_paths:
-        print("Diretórios CUDA encontrados no PATH:")
+        print("CUDA directories found in PATH:")
         for p in cuda_paths:
             print(f"  • {p}")
         return True
     else:
-        print("Nenhum diretório CUDA encontrado no PATH")
+        print("No CUDA directories found in PATH")
         return False
 
 def check_tensorrt_dlls():
-    # Verifica DLLs do TensorRT
-    print_section("BIBLIOTECAS TENSORRT")
+    # Check TensorRT DLLs
+    print_section("TENSORRT LIBRARIES")
     
-    # Usa utilitário compartilhado para encontrar caminho do TensorRT
+    # Use shared utility to find the TensorRT path
     trt_lib_path = find_tensorrt_lib_path()
     
     if not trt_lib_path:
-        print("TensorRT não encontrado em locais padrão ou TENSORRT_DIR")
+        print("TensorRT not found in default locations or TENSORRT_DIR")
         return False
         
     nvinfer_path = os.path.join(trt_lib_path, "nvinfer_10.dll")
-    print(f"Verificando nvinfer_10.dll em: {trt_lib_path}")
+    print(f"Checking for nvinfer_10.dll in: {trt_lib_path}")
     
     if not os.path.exists(trt_lib_path):
-        print(f"Diretório TensorRT não encontrado")
+        print(f"TensorRT directory not found")
         return False
         
     if os.path.exists(nvinfer_path):
-        print("Arquivo nvinfer_10.dll existe")
+        print("nvinfer_10.dll exists")
         try:
-            # Tenta carregar explicitamente para ver se faltam dependências
+            # Try loading it explicitly to see if any dependencies are missing
             ctypes.CDLL(nvinfer_path)
-            print("nvinfer_10.dll carregada com sucesso")
+            print("nvinfer_10.dll loaded successfully")
             return True
         except Exception as e:
-            print(f"Falha ao carregar nvinfer_10.dll: {e}")
-            print("Isso geralmente significa que uma dependência (como zlibwapi.dll ou cudart) está faltando no PATH")
+            print(f"Failed to load nvinfer_10.dll: {e}")
+            print("This usually means a dependency (such as zlibwapi.dll or cudart) is missing from PATH")
             return False
     else:
-        print("Arquivo nvinfer_10.dll NÃO encontrado")
+        print("nvinfer_10.dll NOT found")
         return False
 
 def check_dependencies():
-    # Verifica dependências importantes
-    print_section("DEPENDÊNCIAS")
+    # Check important dependencies
+    print_section("DEPENDENCIES")
     
-    # Verifica zlibwapi no PATH
-    print("Verificando zlibwapi.dll no PATH.")
+    # Check for zlibwapi in PATH
+    print("Checking for zlibwapi.dll in PATH.")
     found_zlib_in_path = False
     for p in os.environ['PATH'].split(';'):
         zlib_path = os.path.join(p, "zlibwapi.dll")
         if os.path.exists(zlib_path):
-            print(f"zlibwapi.dll encontrada no PATH: {zlib_path}")
+            print(f"zlibwapi.dll found in PATH: {zlib_path}")
             found_zlib_in_path = True
             break
     
     if not found_zlib_in_path:
-        print("zlibwapi.dll NÃO encontrada no PATH")
+        print("zlibwapi.dll NOT found in PATH")
     
-    # Verifica zlibwapi em locais conhecidos (torch/lib)
-    print("Verificando zlibwapi.dll em locais conhecidos.")
+    # Check for zlibwapi in known locations (torch/lib)
+    print("Checking for zlibwapi.dll in known locations.")
     found_zlib_torch = False
     try:
         import torch
         torch_lib = os.path.join(os.path.dirname(torch.__file__), 'lib')
         zlib_torch_path = os.path.join(torch_lib, 'zlibwapi.dll')
         if os.path.exists(zlib_torch_path):
-            print(f"zlibwapi.dll encontrada em torch/lib: {zlib_torch_path}")
+            print(f"zlibwapi.dll found in torch/lib: {zlib_torch_path}")
             found_zlib_torch = True
         else:
-            print(f"zlibwapi.dll NÃO encontrada em: {torch_lib}")
+            print(f"zlibwapi.dll NOT found in: {torch_lib}")
     except ImportError:
-        print("PyTorch não está instalado, não foi possível verificar torch/lib")
+        print("PyTorch is not installed, could not check torch/lib")
     
-    # zlibwapi é considerado OK se estiver em qualquer um dos locais
+    # zlibwapi counts as OK if found in either location
     return found_zlib_in_path or found_zlib_torch
 
 def main():
-    # Executa todas as verificações
+    # Run all checks
     print("\n" + "="*60)
-    print("DIAGNÓSTICO COMPLETO DO AMBIENTE")
+    print("FULL ENVIRONMENT DIAGNOSTICS")
     print("="*60)
     
     results = {
-        'Python': True,  # Sempre True se o script está rodando
+        'Python': True,  # Always True if the script is running
         'TensorRT': check_tensorrt(),
         'ONNX Runtime': check_onnxruntime(),
         'PyTorch/CUDA': check_pytorch_cuda(),
         'CUDA PATH': check_cuda_paths(),
         'TensorRT DLLs': check_tensorrt_dlls(),
-        'Dependências': check_dependencies()
+        'Dependencies': check_dependencies()
     }
     
-    # Resumo final
-    print_section("RESUMO")
+    # Final summary
+    print_section("SUMMARY")
     check_python_info()
     
-    print("\nStatus dos componentes:")
+    print("\nComponent status:")
     for component, status in results.items():
         status_icon = "✓" if status else "❌"
         print(f"{status_icon} {component}")
     
-    # Análise geral
+    # Overall result
     all_ok = all(results.values())
     
     print(f"\n{'='*60}")
     if all_ok:
-        print("AMBIENTE CONFIGURADO CORRETAMENTE.")
-        print("Todos os componentes necessários estão disponíveis.")
+        print("ENVIRONMENT CONFIGURED CORRECTLY.")
+        print("All required components are available.")
     else:
-        print("ALGUMAS VERIFICAÇÕES FALHARAM.")
-        print("Revise os erros acima para configurar o ambiente.")
+        print("SOME CHECKS FAILED.")
+        print("Review the errors above to fix the environment setup.")
     print(f"{'='*60}\n")
     
     return 0 if all_ok else 1

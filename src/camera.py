@@ -4,11 +4,11 @@ import time
 
 class WebcamStream: 
     def __init__(self, src=0, fps=30): 
-        # Usa DirectShow (CAP_DSHOW) para Windows para evitar erros MSMF e melhorar a velocidade de inicialização 
+        # Use DirectShow (CAP_DSHOW) on Windows to avoid MSMF errors and speed up initialization 
         self.stream = cv2.VideoCapture(src, cv2.CAP_DSHOW) 
         (self.grabbed, self.frame) = self.stream.read() 
         self.stopped = False 
-        # Define resolução, pode ser ajustado 
+        # Set the resolution (can be adjusted) 
         self.stream.set(cv2.CAP_PROP_FRAME_WIDTH, 1920) 
         self.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080) 
         self.stream.set(cv2.CAP_PROP_FPS, fps)
