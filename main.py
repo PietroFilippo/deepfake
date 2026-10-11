@@ -16,7 +16,8 @@ IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
 def parse_args():
     parser = argparse.ArgumentParser(description="Real-time Deepfake")
     parser.add_argument("--source", help="Path to the initial source image", required=True)
-    parser.add_argument("--model", help="Path to the inswapper model", default=model_path("inswapper_128_fp16.onnx"))
+    parser.add_argument("--model", default=model_path("inswapper_128_fp16.onnx"),
+                        help="Path to the swap model: inswapper_128(_fp16).onnx or hyperswap_1a/1b/1c_256.onnx")
 
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--video", help="Path to the target video file")
@@ -25,9 +26,10 @@ def parse_args():
     parser.add_argument("--out", help="Path to save the recorded/processed video")
 
     quality = parser.add_argument_group("quality")
-    quality.add_argument("--pixel-boost", type=int, choices=PIXEL_BOOST_SIZES, default=128,
-                         help="Resolution the face is swapped at. Values above 128 run the model on several "
-                              "interleaved 128px tiles: sharper, but (size/128)^2 times slower. Default: 128.")
+    quality.add_argument("--pixel-boost", type=int, choices=PIXEL_BOOST_SIZES, default=None,
+                         help="Resolution the face is swapped at. Values above the model's own resolution run "
+                              "the model on several interleaved tiles: sharper, but (size/model size)^2 times "
+                              "slower. Default: the model's resolution (128 for inswapper, 256 for HyperSwap).")
     quality.add_argument("--face-mask", choices=FACE_MASKS, default="box",
                          help="'parser' keeps hair, hands and glasses of the target in front of the face "
                               "(slower). Default: box.")
@@ -134,7 +136,7 @@ def run_webcam(args, swapper, image_files, current_image_index):
     print("  'p': Previous image")
     print("  'x': Toggle swap on/off")
     print("  'e': Toggle face enhancement on/off")
-    print("  'b': Cycle pixel boost (128/256/384/512)")
+    print(f"  'b': Cycle pixel boost ({'/'.join(map(str, swapper.boost_sizes))})")
     print("  'm': Toggle face mask (box/parser)")
     print("  'r': Start/Stop recording")
     print("  'u': Show/Hide interface (UI)")
@@ -240,7 +242,7 @@ def run_webcam(args, swapper, image_files, current_image_index):
                 else:
                     print("Enhancer not available.")
             elif key == ord('b'):
-                sizes = PIXEL_BOOST_SIZES
+                sizes = swapper.boost_sizes
                 swapper.pixel_boost = sizes[(sizes.index(swapper.pixel_boost) + 1) % len(sizes)]
                 print(f"Pixel boost: {swapper.pixel_boost}")
             elif key == ord('m'):

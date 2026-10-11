@@ -66,6 +66,7 @@ pip install "C:\Program Files\TensorRT-10.4.0.26\python\tensorrt_lean-10.4.0-cp3
 Place the `GFPGANv1.4.onnx` and `inswapper_128.onnx` files (or its FP16 version, `inswapper_128_fp16.onnx`, if you already have it) in the `models/` folder.
 
 Optional:
+- `hyperswap_1a_256.onnx` (or `1b`/`1c`): higher-resolution swap model, see [HyperSwap](#hyperswap-256x256-swap-model).
 - `face_parser.onnx` (BiSeNet face parsing, 512x512): used for the anatomical enhancer mask and `--face-mask parser`.
 - `GPEN-BFR-512.onnx`: alternative face enhancer (`--enhancer-model models/GPEN-BFR-512.onnx`).
 
@@ -154,14 +155,14 @@ python main.py --source <image> [options]
 
 #### Main Arguments
 - `--source`: Image of the face to apply (required)
-- `--model`: Path to the inswapper model (default: `models/inswapper_128_fp16.onnx`)
+- `--model`: Path to the swap model (default: `models/inswapper_128_fp16.onnx`). Also supports `models/hyperswap_1a_256.onnx` (1b/1c).
 - `--video`: Path to the input video (offline processing)
 - `--image`: Path to the input image (static processing)
 - `--gif`: Path to the input GIF (animated processing)
 - `--out`: Custom path for the output file
 
 #### Quality Arguments
-- `--pixel-boost`: Resolution the face is swapped at: `128` (default), `256`, `384` or `512`. See [Improving Quality](#improving-quality).
+- `--pixel-boost`: Resolution the face is swapped at: `128`, `256`, `384` or `512` (default: the model's own resolution). See [Improving Quality](#improving-quality).
 - `--face-mask`: `box` (default) or `parser`. `parser` keeps hair, hands and glasses that cover the target face (slower).
 - `--enhance`: Enables the face enhancer by default on startup (can be used with videos and images)
 - `--enhancer-model`: Enhancer model (default: `models/GFPGANv1.4.onnx`, e.g. `models/GPEN-BFR-512.onnx`)
@@ -185,14 +186,14 @@ python main.py --source <image> [options]
 - **p**: Switch to the previous image in the `images/` folder
 - **x**: Toggle face swapping on/off (shows the original webcam feed)
 - **e**: Toggle face "enhancement" on/off
-- **b**: Cycle pixel boost (128 → 256 → 384 → 512)
+- **b**: Cycle pixel boost (128 → 256 → 384 → 512; 256 → 512 with HyperSwap)
 - **m**: Toggle the face mask (box/parser)
 - **r**: Start/stop recording (saved to `outputs/`)
 - **u**: Show/hide the UI overlay (FPS, status, REC indicator)
 
 ## Improving Quality
 
-`inswapper_128` produces a 128x128 face, which looks soft once it is scaled up to a face that fills a 1080p frame. In order of cost:
+`inswapper_128` produces a 128x128 face, which looks soft once it is scaled up to a face that fills a 1080p frame. InsightFace never released its 256/512 versions publicly (they are only available commercially through Picsi.ai), so there are two ways around it: pixel boost, and a natively higher-resolution model ([HyperSwap](#hyperswap-256x256-swap-model)). In order of cost:
 
 1. **Pixel boost** (`--pixel-boost 256/384/512`, or the `b` key): the face is cropped at a higher resolution and split into interleaved 128x128 sub-images (every 2nd/3rd/4th pixel). Each one is swapped and the results are woven back together, so the swapped face keeps 2-4x more detail with the same model and the same identity quality. It costs (size/128)² model runs per face:
 
@@ -210,6 +211,31 @@ Recommended for files:
 ```bash
 python main.py --source images/my_photo.jpg --video images/my_video.mp4 --pixel-boost 512 --enhance --enhance-blend 0.6
 ```
+
+### HyperSwap (256x256 swap model)
+
+[HyperSwap](https://github.com/facefusion/facefusion-labs/tree/master/hyperswap) is a face swap model released by the FaceFusion team in 2025. It works at 256x256 natively, uses the same face alignment and identity embedding (ArcFace) as inswapper, and runs about as fast on TensorRT as `inswapper_128` (~6.5 ms per run on an RTX 4060 Ti), so it gives twice the resolution at the same cost. Pixel boost also works with it (`--pixel-boost 512` = 4 runs per face).
+
+Download one of the three variants (they were trained differently; try them all and keep the one whose likeness you prefer) into `models/`:
+- [hyperswap_1a_256.onnx](https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1a_256.onnx)
+- [hyperswap_1b_256.onnx](https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1b_256.onnx)
+- [hyperswap_1c_256.onnx](https://huggingface.co/facefusion/models-3.3.0/resolve/main/hyperswap_1c_256.onnx)
+
+```bash
+python main.py --source images/my_photo.jpg --model models/hyperswap_1a_256.onnx
+python main.py --source images/my_photo.jpg --model models/hyperswap_1a_256.onnx --video images/my_video.mp4 --pixel-boost 512
+```
+
+In self-swap tests (each photo swapped onto itself, 6 photos) HyperSwap kept more detail and the original eye color, which inswapper tends to turn brown:
+
+| Model | ArcFace similarity to the source | PSNR vs. original | Time per frame (large photos, incl. detection) |
+|---|---|---|---|
+| inswapper_128 | 0.942 | 26.2 dB | 26 ms |
+| inswapper_128, pixel boost 512 | 0.944 | 26.3 dB | 139 ms |
+| hyperswap_1a_256 | 0.983 | 33.3 dB | 38 ms |
+| hyperswap_1a_256, pixel boost 512 | 0.982 | 35.1 dB | 59 ms |
+
+Self-swaps reward a model that keeps more of the target face, so they don't prove that the source identity transfers better; compare the likeness on your own photos. HyperSwap is released under a ResearchRAIL license (research use; read its terms before any commercial use). `inswapper_128` is non-commercial too.
 
 ## Face "Enhancement" (Face Enhancer)
 
