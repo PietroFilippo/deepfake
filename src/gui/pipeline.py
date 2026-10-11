@@ -14,10 +14,10 @@ from ..recorder import Recorder
 
 
 class LivePipeline:
-    def __init__(self, swapper, on_status=print, on_recording_failed=lambda: None):
+    def __init__(self, swapper, on_status=print, on_recording_stopped=lambda: None):
         self.swapper = swapper
         self.on_status = on_status
-        self.on_recording_failed = on_recording_failed
+        self.on_recording_stopped = on_recording_stopped  # called when a recording ends by itself
         self.detect_interval = 1
         self.swap_enabled = True
 
@@ -33,6 +33,7 @@ class LivePipeline:
         self.vcam_fps = 30
         self.recorder = None
         self._recording_path = None
+        self._shrink_pending = False
         self.fps = 0.0
 
     # ------------------------------------------------------------------ called from the GUI thread
@@ -71,6 +72,13 @@ class LivePipeline:
     def stop_recording(self):
         self._commands.put(self._stop_recording)
 
+    def set_workers(self, count):
+        """Resizes the worker pool from the pipeline thread (the only one submitting frames)."""
+        def apply():
+            self.swapper.set_max_workers(count)
+            self._shrink_pending = True
+        self._commands.put(apply)
+
     @property
     def recording(self):
         return self.recorder is not None or self._recording_path is not None
@@ -82,6 +90,10 @@ class LivePipeline:
     # ------------------------------------------------------------------ pipeline thread
 
     def _open_camera(self, index, width, height, fps):
+        if self.recorder or self._recording_path:
+            # A recording has a fixed frame size: finish it before the camera changes
+            self._stop_recording()
+            self.on_recording_stopped()
         if self.webcam:
             self.webcam.stop()
             self.webcam = None
@@ -142,7 +154,7 @@ class LivePipeline:
                 self.on_status(f"Recording to {path}")
             except Exception as e:
                 self.on_status(f"Error starting recording: {e}")
-                self.on_recording_failed()
+                self.on_recording_stopped()
         if self.recorder:
             self.recorder.write(frame)
 
@@ -158,6 +170,12 @@ class LivePipeline:
                         self._commands.get_nowait()()
                     except Exception as e:
                         self.on_status(f"Error: {e}")
+
+                if self._shrink_pending:
+                    # Fewer workers: drop the extra queued frames so the delay shrinks right away
+                    self._shrink_pending = False
+                    while len(pending) > max(0, self.swapper.max_workers - 1):
+                        pending.popleft()
 
                 if self.webcam is None:
                     time.sleep(0.05)

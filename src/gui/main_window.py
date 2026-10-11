@@ -70,7 +70,8 @@ class Bridge(QObject):
     source_set = Signal(str, bool, str)
     file_progress = Signal(int, int)
     file_done = Signal(str)
-    recording_failed = Signal()
+    recording_stopped = Signal()
+    shutdown_done = Signal()
 
 
 class VideoView(QWidget):
@@ -142,6 +143,10 @@ class MainWindow(QWidget):
         self._file_job = None
         self._cancel_file = False
         self._recording = False
+        self._closing = False
+        self._closed = False
+        self._source_lock = threading.Lock()
+        self._source_generation = 0
         self._last_frame_number = 0
         self._status_time = 0.0
 
@@ -159,7 +164,8 @@ class MainWindow(QWidget):
         self.bridge.source_set.connect(self._on_source_set)
         self.bridge.file_progress.connect(self._on_file_progress)
         self.bridge.file_done.connect(self._on_file_done)
-        self.bridge.recording_failed.connect(self._on_recording_failed)
+        self.bridge.recording_stopped.connect(self._on_recording_stopped)
+        self.bridge.shutdown_done.connect(self._on_shutdown_done)
 
         self._add_shortcuts()
         self.timer = QTimer(self)
@@ -220,10 +226,12 @@ class MainWindow(QWidget):
             self.bridge.swapper_failed.emit(str(e))
 
     def _on_swapper_ready(self, swapper):
+        if self._closing:
+            return
         self.swapper = swapper
         s = self.settings
         self.pipeline = LivePipeline(swapper, on_status=self.bridge.status.emit,
-                                     on_recording_failed=self.bridge.recording_failed.emit)
+                                     on_recording_stopped=self.bridge.recording_stopped.emit)
         self.pipeline.detect_interval = s.detect_interval
         self.pipeline.start()
         self.pipeline.open_camera(s.camera_index, *s.resolution_size(), s.camera_fps)
@@ -546,13 +554,19 @@ class MainWindow(QWidget):
         if not self.swapper or not path:
             return
         self._set_status(f"Setting source face: {os.path.basename(path)}")
+        self._source_generation += 1
+        generation = self._source_generation
 
         def work():
-            try:
-                self.swapper.set_source_image(path)
-                self.bridge.source_set.emit(path, True, f"Source face: {os.path.basename(path)}")
-            except Exception as e:
-                self.bridge.source_set.emit(path, False, f"{os.path.basename(path)}: {e}")
+            # One at a time, and only the newest choice: a slow earlier pick can't override a later one
+            with self._source_lock:
+                if generation != self._source_generation:
+                    return
+                try:
+                    self.swapper.set_source_image(path)
+                    self.bridge.source_set.emit(path, True, f"Source face: {os.path.basename(path)}")
+                except Exception as e:
+                    self.bridge.source_set.emit(path, False, f"{os.path.basename(path)}: {e}")
         threading.Thread(target=work, daemon=True).start()
 
     def _on_source_set(self, path, ok, message):
@@ -575,7 +589,11 @@ class MainWindow(QWidget):
         self.choose_source(self.faces_list.item(row).data(Qt.UserRole))
 
     def _change_swap_model(self, name):
-        if not self.swapper or self._loading_model or not name or name == self.swapper.model.name:
+        if not self.swapper or self._loading_model or not name:
+            return
+        same_file = os.path.normcase(os.path.abspath(self.settings.model_file(name))) == \
+            os.path.normcase(os.path.abspath(self.swapper.model.path))
+        if same_file:
             return
         self._loading_model = True
         self.swap_combo.setEnabled(False)
@@ -692,8 +710,8 @@ class MainWindow(QWidget):
         self._update_setting('virtual_cam', enabled)
 
     def _set_workers(self, value):
-        if self.swapper:
-            self.swapper.set_max_workers(value)
+        if self.pipeline:
+            self.pipeline.set_workers(value)
         self._update_setting('max_workers', value)
 
     def _set_hud(self, visible):
@@ -715,7 +733,7 @@ class MainWindow(QWidget):
             self.pipeline.start_recording(path)
             self.record_button.setText("Stop recording  (R)")
 
-    def _on_recording_failed(self):
+    def _on_recording_stopped(self):
         self._recording = False
         self.record_button.setText("Start recording  (R)")
 
@@ -887,21 +905,36 @@ class MainWindow(QWidget):
             self.video.update()
 
     def closeEvent(self, event):
+        if self._closed:
+            super().closeEvent(event)
+            return
+        # Finish the recording and stop a file job in the background, keeping the window responsive,
+        # then close for real (see _on_shutdown_done)
+        event.ignore()
+        if self._closing:
+            return
+        self._closing = True
         self.settings.save()
-        if self._file_job:
-            # Let the file job stop cleanly (a cancelled video is still finalized)
-            self._cancel_file = True
-            self._set_status("Stopping file processing...")
-            QApplication.processEvents()
-            self._file_job.join(timeout=30)
-        if self.pipeline:
-            if self.pipeline.recording:
-                self._set_status("Saving recording...")
-                QApplication.processEvents()
-            self.pipeline.stop()
-        if self.swapper:
-            self.swapper.executor.shutdown(wait=False, cancel_futures=True)
-        super().closeEvent(event)
+        for w in self._controls:
+            w.setEnabled(False)
+        self._cancel_file = True
+        file_job, pipeline, swapper = self._file_job, self.pipeline, self.swapper
+        if file_job or (pipeline and pipeline.recording):
+            self._set_status("Closing: finishing the recording / file...")
+
+        def shutdown():
+            if file_job:
+                file_job.join()  # a cancelled video is still finalized
+            if pipeline:
+                pipeline.stop()  # encodes an ongoing recording
+            if swapper:
+                swapper.executor.shutdown(wait=False, cancel_futures=True)
+            self.bridge.shutdown_done.emit()
+        threading.Thread(target=shutdown, daemon=True).start()
+
+    def _on_shutdown_done(self):
+        self._closed = True
+        self.close()
 
 
 def run():

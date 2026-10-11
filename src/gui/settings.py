@@ -2,12 +2,15 @@
 App settings, saved as JSON next to the app (settings.json).
 """
 import json
+import math
 import os
 from dataclasses import dataclass, asdict, fields
 
 from ..utils import PROJECT_ROOT, MODELS_DIR, OUTPUTS_DIR
 
 SETTINGS_PATH = os.path.join(PROJECT_ROOT, 'settings.json')
+
+PIXEL_BOOST_SIZES = (128, 256, 384, 512)  # same as src.swapper (not imported to keep this module light)
 
 # Model files are recognized by name inside the models folder
 SWAP_MODEL_KEYS = ('inswapper', 'hyperswap')
@@ -48,6 +51,8 @@ class Settings:
                 data = json.load(f)
         except (OSError, ValueError):
             return settings
+        if not isinstance(data, dict):
+            return settings
         for field in fields(cls):
             value = data.get(field.name)
             default = getattr(settings, field.name)
@@ -56,7 +61,27 @@ class Settings:
             # Ignore missing or wrongly typed values (e.g. from a hand-edited file)
             if type(value) is type(default):
                 setattr(settings, field.name, value)
+        settings._validate()
         return settings
+
+    def _validate(self):
+        """Resets out-of-range values (e.g. from a hand-edited file) to their defaults."""
+        defaults = Settings()
+        valid = {
+            'enhance_blend': lambda v: math.isfinite(v) and 0.0 <= v <= 1.0,
+            'pixel_boost': lambda v: v in PIXEL_BOOST_SIZES,
+            'file_pixel_boost': lambda v: v in PIXEL_BOOST_SIZES,
+            'face_mask': lambda v: v in ('box', 'parser'),
+            'detect_interval': lambda v: 1 <= v <= 10,
+            'det_size': lambda v: v in (320, 480, 640),
+            'camera_index': lambda v: 0 <= v <= 9,
+            'resolution': lambda v: v in RESOLUTIONS,
+            'camera_fps': lambda v: v in (15, 24, 30, 60),
+            'max_workers': lambda v: 1 <= v <= 8,
+        }
+        for name, check in valid.items():
+            if not check(getattr(self, name)):
+                setattr(self, name, getattr(defaults, name))
 
     def save(self):
         try:

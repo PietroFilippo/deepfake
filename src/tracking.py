@@ -66,31 +66,29 @@ class FaceTracker:
 
     def update(self, faces, t):
         """Returns copies of `faces` with smoothed landmarks. `t` is the frame time in seconds."""
-        unmatched = list(self.tracks)
-        tracks = []
+        # Faces missed for too long start over
+        live = [tr for tr in self.tracks if 0 <= t - tr['last_seen'] < self.max_age]
+        kpss = [np.asarray(face.kps, dtype=np.float64) for face in faces]
+        sizes = [float(face.bbox[2] - face.bbox[0]) for face in faces]
+
+        # One-to-one matching, closest pairs first (enough for the few faces in a frame)
+        pairs = sorted((np.linalg.norm(kps.mean(axis=0) - tr['center']), i, j)
+                       for i, kps in enumerate(kpss) for j, tr in enumerate(live))
+        assigned, used = {}, set()
+        for distance, i, j in pairs:
+            if i not in assigned and j not in used and distance < 0.5 * sizes[i]:
+                assigned[i] = live[j]
+                used.add(j)
+
         smoothed = []
-        # Larger faces first, so they get their own track when faces are close together
-        for face in sorted(faces, key=lambda f: -(f.bbox[2] - f.bbox[0])):
-            kps = np.asarray(face.kps, dtype=np.float64)
-            center = kps.mean(axis=0)
-            size = float(face.bbox[2] - face.bbox[0])
-
-            track = None
-            if unmatched:
-                distances = [np.linalg.norm(center - tr['center']) for tr in unmatched]
-                best = int(np.argmin(distances))
-                if distances[best] < 0.5 * size:
-                    track = unmatched.pop(best)
-            if track is None:
-                track = {'filter': OneEuroFilter(self.min_cutoff, self.beta)}
-
-            kps = track['filter'](kps, t, size)
+        for i, face in enumerate(faces):
+            track = assigned.get(i) or {'filter': OneEuroFilter(self.min_cutoff, self.beta)}
+            kps = track['filter'](kpss[i], t, sizes[i])
             track['center'] = kps.mean(axis=0)
             track['last_seen'] = t
-            tracks.append(track)
+            assigned[i] = track
             smoothed.append(Face(bbox=face.bbox, kps=kps.astype(np.float32), det_score=face.det_score))
 
         # Keep briefly missed faces so a single missed detection doesn't reset the smoothing
-        tracks += [tr for tr in unmatched if t - tr['last_seen'] < self.max_age]
-        self.tracks = tracks
+        self.tracks = list(assigned.values()) + [tr for j, tr in enumerate(live) if j not in used]
         return smoothed

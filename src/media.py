@@ -3,7 +3,6 @@ Offline processing of images, videos and GIFs.
 """
 import json
 import math
-import shutil
 import subprocess
 import tempfile
 import time
@@ -14,7 +13,7 @@ import numpy as np
 from PIL import Image, ImageSequence
 
 from .tracking import FaceTracker
-from .utils import read_image, write_image
+from .utils import ffmpeg_executable, ffprobe_executable, read_image, write_image
 
 
 def _print_progress(frame_count, total_frames, start_time, progress=None):
@@ -34,7 +33,7 @@ def process_image(swapper, image_path, out_path, show=True, pixel_boost=None):
     if target_img is None:
         raise ValueError(f"Could not read the target image: {image_path}")
 
-    res = swapper.process_frame(target_img, pixel_boost=pixel_boost)
+    res = swapper.process_frame(target_img, job=swapper.job(pixel_boost))
     write_image(out_path, res)
     print(f"Saved to: {out_path}")
 
@@ -57,8 +56,11 @@ def _probe_video_stream(video_path, average_fps):
     """
     rate = Fraction(average_fps).limit_denominator(1001)
     duration_ms = None
+    ffprobe = ffprobe_executable()
+    if not ffprobe:
+        return rate, duration_ms
     try:
-        result = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
+        result = subprocess.run([ffprobe, '-v', 'error', '-select_streams', 'v:0', '-show_entries',
                                  'stream=r_frame_rate,duration', '-of', 'json', video_path],
                                 capture_output=True, text=True, check=True)
         stream = json.loads(result.stdout)['streams'][0]
@@ -96,8 +98,9 @@ def process_video(swapper, video_path, out_path, pixel_boost=None, progress=None
     ffmpeg = None
     writer = None
     ffmpeg_log = tempfile.TemporaryFile()
-    if shutil.which('ffmpeg'):
-        cmd = ['ffmpeg', '-y', '-loglevel', 'error',
+    ffmpeg_path = ffmpeg_executable()
+    if ffmpeg_path:
+        cmd = [ffmpeg_path, '-y', '-loglevel', 'error',
                '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{width}x{height}', '-r', str(fps), '-i', '-',
                '-i', video_path,
                '-map', '0:v:0', '-map', '1:a:0?',
@@ -105,6 +108,8 @@ def process_video(swapper, video_path, out_path, pixel_boost=None, progress=None
                '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
                '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
                '-c:a', 'aac', '-b:a', '192k',
+               # Ends with the video: a cancelled export doesn't keep the rest of the audio
+               '-shortest',
                out_path]
         ffmpeg = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=ffmpeg_log)
         print(f"Processing {total_frames} frames.")
@@ -121,6 +126,8 @@ def process_video(swapper, video_path, out_path, pixel_boost=None, progress=None
     frame_interval_ms = 1000.0 / float(fps)
     written = 0
 
+    # The whole video uses the models/settings active when it started, even if they change meanwhile
+    job, det_size = swapper.job(pixel_boost), swapper.det_size
     # Landmark smoothing across frames (timestamps in seconds)
     tracker = FaceTracker() if swapper.smoothing else None
 
@@ -128,7 +135,7 @@ def process_video(swapper, video_path, out_path, pixel_boost=None, progress=None
         nonlocal written
         if until_slot <= written:
             return
-        res = swapper.process_frame(frame, tracker=tracker, timestamp=frame_ms / 1000.0, pixel_boost=pixel_boost)
+        res = swapper.process_frame(frame, tracker=tracker, timestamp=frame_ms / 1000.0, job=job, det_size=det_size)
         for _ in range(until_slot - written):
             if ffmpeg:
                 ffmpeg.stdin.write(res.tobytes())
@@ -198,6 +205,7 @@ def process_video(swapper, video_path, out_path, pixel_boost=None, progress=None
 def process_gif(swapper, gif_path, out_path, pixel_boost=None, progress=None, cancel=None):
     frames = []
     durations = []
+    job, det_size = swapper.job(pixel_boost), swapper.det_size
     tracker = FaceTracker() if swapper.smoothing else None
     with Image.open(gif_path) as gif:
         total_frames = getattr(gif, 'n_frames', 0)
@@ -210,7 +218,7 @@ def process_gif(swapper, gif_path, out_path, pixel_boost=None, progress=None, ca
             durations.append(frame.info.get('duration', 100))
             frame_bgr = cv2.cvtColor(np.array(frame.convert('RGB')), cv2.COLOR_RGB2BGR)
 
-            res_bgr = swapper.process_frame(frame_bgr, tracker=tracker, timestamp=timestamp, pixel_boost=pixel_boost)
+            res_bgr = swapper.process_frame(frame_bgr, tracker=tracker, timestamp=timestamp, job=job, det_size=det_size)
             frames.append(Image.fromarray(cv2.cvtColor(res_bgr, cv2.COLOR_BGR2RGB)))
             _print_progress(len(frames), total_frames, start_time, progress)
 

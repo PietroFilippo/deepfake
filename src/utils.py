@@ -3,6 +3,7 @@ Shared utilities for the deepfake project.
 Centralizes common functionality used across multiple modules.
 """
 import os
+import shutil
 import sys
 
 import cv2
@@ -47,6 +48,23 @@ def write_image(path, img):
     buf.tofile(path)
 
 
+def ffmpeg_executable():
+    """ffmpeg on the PATH, or the copy bundled with the imageio-ffmpeg package. None if neither exists."""
+    path = shutil.which('ffmpeg')
+    if path:
+        return path
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
+def ffprobe_executable():
+    """ffprobe on the PATH (imageio-ffmpeg doesn't include it). None if missing."""
+    return shutil.which('ffprobe')
+
+
 def find_tensorrt_lib_path():
     """
     Automatically detects the TensorRT library path from an environment variable or common locations.
@@ -81,6 +99,8 @@ def setup_dll_directories():
     """
     if os.name != 'nt':
         return  # Only needed on Windows
+    if getattr(sys, 'frozen', False):
+        return  # The packaged app ships its own CUDA/cuDNN/TensorRT DLLs next to the executable
     
     try:
         # Add the ONNX Runtime capi directory

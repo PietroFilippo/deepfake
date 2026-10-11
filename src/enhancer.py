@@ -42,13 +42,14 @@ class FaceEnhancer:
         self.size = size if isinstance(size, int) else 512
         print("[FaceEnhancer] Model loaded successfully.")
 
-    def enhance(self, frame, faces):
+    def enhance(self, frame, faces, blend=None):
         """
         Enhances the quality of the detected faces in the frame.
 
         Args:
             frame: BGR image (numpy array).
             faces: List of face objects (InsightFace) that were swapped. Only `kps` is used.
+            blend: Overrides self.blend for this call.
 
         Returns:
             frame: Image with "enhanced" faces.
@@ -58,6 +59,7 @@ class FaceEnhancer:
 
         enhanced_frame = frame.copy()
         size = self.size
+        blend = self.blend if blend is None else blend
 
         for face in faces:
             try:
@@ -78,8 +80,8 @@ class FaceEnhancer:
                 output = np.clip((output + 1.0) * 127.5 + 0.5, 0, 255).astype(np.uint8)
                 output = np.ascontiguousarray(output[:, :, ::-1])
 
-                if self.blend < 1.0:
-                    output = cv2.addWeighted(output, self.blend, crop, 1.0 - self.blend, 0)
+                if blend < 1.0:
+                    output = cv2.addWeighted(output, blend, crop, 1.0 - blend, 0)
 
                 # Anatomical mask via BiSeNet (face_parser) on the aligned crop. Failure -> box mask.
                 mask = box_mask(size)

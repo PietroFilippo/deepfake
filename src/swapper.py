@@ -26,7 +26,7 @@ FACE_MASKS = ('box', 'parser')
 
 # Everything a worker needs to process one frame, captured when the frame is submitted, so
 # settings or models can change at any time without a frame mixing old and new state
-SwapJob = namedtuple('SwapJob', 'model latent crop_size face_mask enhancer')
+SwapJob = namedtuple('SwapJob', 'model latent crop_size face_mask enhancer enhance_blend')
 
 
 class SwapModel:
@@ -232,7 +232,7 @@ class FaceSwapper:
         model, latent = self._active
         enhancer = self.enhancer if self.enhancement_enabled else None
         crop_size = model.crop_size(pixel_boost or self._pixel_boost)
-        return SwapJob(model, latent, crop_size, self.face_mask, enhancer)
+        return SwapJob(model, latent, crop_size, self.face_mask, enhancer, self.enhance_blend)
 
     # ------------------------------------------------------------------ processing
 
@@ -288,23 +288,25 @@ class FaceSwapper:
         # Apply enhancement if enabled and available
         if job.enhancer:
             try:
-                res = job.enhancer.enhance(res, faces)
+                res = job.enhancer.enhance(res, faces, blend=job.enhance_blend)
             except Exception as e:
                 print(f"[FaceSwapper] Enhancer error: {e}")
 
         return res
 
-    def process_frame(self, frame, tracker=None, timestamp=None, pixel_boost=None, det_size=None):
+    def process_frame(self, frame, tracker=None, timestamp=None, job=None, det_size=None):
         """
         Detects and swaps every face in a single frame (synchronous, used by the offline modes).
-        Pass a FaceTracker and the frame's timestamp (seconds) to smooth landmarks across video frames.
+        Pass a FaceTracker and the frame's timestamp (seconds) to smooth landmarks across video frames,
+        and a fixed `job` (see job()) so a whole file is processed with the same models and settings.
         """
-        if self.source_latent is None:
+        job = job or self.job()
+        if job.latent is None:
             return frame
         faces = self.detect_faces(frame, input_size=det_size)
         if tracker is not None and timestamp is not None:
             faces = tracker.update(faces, timestamp)
-        return self._swap_worker(frame, faces, self.job(pixel_boost))
+        return self._swap_worker(frame, faces, job)
 
     def process_frame_async(self, frame, detect_interval=1, timestamp=None):
         if self.source_latent is None:
