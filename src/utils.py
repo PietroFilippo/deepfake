@@ -3,12 +3,17 @@ Shared utilities for the deepfake project.
 Centralizes common functionality used across multiple modules.
 """
 import os
+import sys
 
 import cv2
 import numpy as np
 
-# Absolute paths so the app works no matter which directory it is started from
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Absolute paths so the app works no matter which directory it is started from.
+# In the packaged app (PyInstaller) the folders live next to the executable.
+if getattr(sys, 'frozen', False):
+    PROJECT_ROOT = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS_DIR = os.path.join(PROJECT_ROOT, 'models')
 OUTPUTS_DIR = os.path.join(PROJECT_ROOT, 'outputs')
 TRT_CACHE_DIR = os.path.join(PROJECT_ROOT, 'trt_cache')

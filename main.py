@@ -38,12 +38,15 @@ def parse_args():
                          help="Face enhancer ONNX model (e.g. models/GFPGANv1.4.onnx or models/GPEN-BFR-512.onnx)")
     quality.add_argument("--enhance-blend", type=float, default=0.8,
                          help="How much of the enhanced face is blended in (0-1). Lower = less 'plastic'. Default: 0.8.")
-    quality.add_argument("--det-size", type=int, default=None,
-                         help="Face detector input size. Default: 320 for the webcam, 640 for files.")
+    quality.add_argument("--det-size", type=int, choices=(320, 480, 640), default=640,
+                         help="Face detector input size. 320 is ~2.5 ms faster per frame, 640 gives more "
+                              "precise landmarks. Default: 640.")
+    quality.add_argument("--no-smoothing", action="store_true",
+                         help="Disable landmark smoothing between frames (webcam and video).")
 
     performance = parser.add_argument_group("webcam / performance")
     performance.add_argument("--max-workers", type=int, default=None, help="Maximum number of threads (workers). Fewer = less latency, more = more FPS.")
-    performance.add_argument("--detect-interval", type=int, default=2, help="Frame interval for face detection. 1 = tightest tracking, higher = more FPS. Default: 2.")
+    performance.add_argument("--detect-interval", type=int, default=1, help="Detect faces every N frames. 1 = tightest tracking, higher = a few ms less per frame. Default: 1.")
     performance.add_argument("--camera", type=int, default=0, help="Webcam index. Default: 0.")
     performance.add_argument("--width", type=int, default=1920, help="Requested webcam width. Default: 1920.")
     performance.add_argument("--height", type=int, default=1080, help="Requested webcam height. Default: 1080.")
@@ -296,14 +299,15 @@ def main():
     source_path = image_files[current_image_index]
 
     offline = bool(args.image or args.video or args.gif)
-    det_size = args.det_size or (640 if offline else 320)
+    det_size = args.det_size
 
     print(f"Available images: {len(image_files)}")
     print("Initializing.")
     try:
         swapper = FaceSwapper(args.model, det_size=(det_size, det_size), max_workers=args.max_workers,
                               pixel_boost=args.pixel_boost, face_mask=args.face_mask,
-                              enhancer_model=args.enhancer_model, enhance_blend=args.enhance_blend)
+                              enhancer_model=args.enhancer_model, enhance_blend=args.enhance_blend,
+                              smoothing=not args.no_smoothing)
         swapper.set_source_image(source_path)
         if args.enhance:
             if swapper.enhancer:

@@ -13,10 +13,13 @@ import cv2
 import numpy as np
 from PIL import Image, ImageSequence
 
+from .tracking import FaceTracker
 from .utils import read_image, write_image
 
 
-def _print_progress(frame_count, total_frames, start_time):
+def _print_progress(frame_count, total_frames, start_time, progress=None):
+    if progress:
+        progress(frame_count, total_frames)
     elapsed = time.time() - start_time
     fps_proc = frame_count / elapsed if elapsed > 0 else 0
     if total_frames > 0:
@@ -26,12 +29,12 @@ def _print_progress(frame_count, total_frames, start_time):
         print(f"\rProcessing: FPS: {fps_proc:.2f} | Frame: {frame_count}", end="")
 
 
-def process_image(swapper, image_path, out_path, show=True):
+def process_image(swapper, image_path, out_path, show=True, pixel_boost=None):
     target_img = read_image(image_path)
     if target_img is None:
         raise ValueError(f"Could not read the target image: {image_path}")
 
-    res = swapper.process_frame(target_img)
+    res = swapper.process_frame(target_img, pixel_boost=pixel_boost)
     write_image(out_path, res)
     print(f"Saved to: {out_path}")
 
@@ -74,7 +77,11 @@ def _probe_video_stream(video_path, average_fps):
     return rate, duration_ms
 
 
-def process_video(swapper, video_path, out_path):
+def process_video(swapper, video_path, out_path, pixel_boost=None, progress=None, cancel=None):
+    """
+    Swaps the faces in a video. `progress(done, total)` is called as frames are processed and
+    `cancel()` is polled to stop early (both optional, used by the GUI).
+    """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Could not open the video: {video_path}")
@@ -114,11 +121,14 @@ def process_video(swapper, video_path, out_path):
     frame_interval_ms = 1000.0 / float(fps)
     written = 0
 
-    def emit(frame, until_slot):
+    # Landmark smoothing across frames (timestamps in seconds)
+    tracker = FaceTracker() if swapper.smoothing else None
+
+    def emit(frame, frame_ms, until_slot):
         nonlocal written
         if until_slot <= written:
             return
-        res = swapper.process_frame(frame)
+        res = swapper.process_frame(frame, tracker=tracker, timestamp=frame_ms / 1000.0, pixel_boost=pixel_boost)
         for _ in range(until_slot - written):
             if ffmpeg:
                 ffmpeg.stdin.write(res.tobytes())
@@ -148,16 +158,19 @@ def process_video(swapper, video_path, out_path):
 
             if pending is not None:
                 # Half a slot of tolerance absorbs rounded/jittery timestamps
-                emit(pending, math.ceil(timestamp / frame_interval_ms - 0.5))
+                emit(pending, pending_ms, math.ceil(timestamp / frame_interval_ms - 0.5))
             pending, pending_ms = frame, timestamp
 
             if frame_count % 10 == 0:
-                _print_progress(frame_count, total_frames, start_time)
+                _print_progress(frame_count, total_frames, start_time, progress)
+            if cancel and cancel():
+                pending = None
+                break
 
         if pending is not None:
             # The last frame lasts until the end of the stream (one frame if the length is unknown)
             end_ms = (duration_ms - first_ms) if duration_ms else pending_ms + frame_interval_ms
-            emit(pending, max(written + 1, math.ceil(end_ms / frame_interval_ms - 0.5)))
+            emit(pending, pending_ms, max(written + 1, math.ceil(end_ms / frame_interval_ms - 0.5)))
     except BrokenPipeError:
         pass  # ffmpeg exited early, its error is reported below
     finally:
@@ -182,20 +195,24 @@ def process_video(swapper, video_path, out_path):
     print(f"Done. Saved to: {out_path}")
 
 
-def process_gif(swapper, gif_path, out_path):
+def process_gif(swapper, gif_path, out_path, pixel_boost=None, progress=None, cancel=None):
     frames = []
     durations = []
+    tracker = FaceTracker() if swapper.smoothing else None
     with Image.open(gif_path) as gif:
         total_frames = getattr(gif, 'n_frames', 0)
         start_time = time.time()
         for frame in ImageSequence.Iterator(gif):
+            if cancel and cancel():
+                break
             # Keep each frame's own delay (GIFs often mix frame durations)
+            timestamp = sum(durations) / 1000.0
             durations.append(frame.info.get('duration', 100))
             frame_bgr = cv2.cvtColor(np.array(frame.convert('RGB')), cv2.COLOR_RGB2BGR)
 
-            res_bgr = swapper.process_frame(frame_bgr)
+            res_bgr = swapper.process_frame(frame_bgr, tracker=tracker, timestamp=timestamp, pixel_boost=pixel_boost)
             frames.append(Image.fromarray(cv2.cvtColor(res_bgr, cv2.COLOR_BGR2RGB)))
-            _print_progress(len(frames), total_frames, start_time)
+            _print_progress(len(frames), total_frames, start_time, progress)
 
     if not frames:
         raise ValueError(f"No frames found in {gif_path}")
