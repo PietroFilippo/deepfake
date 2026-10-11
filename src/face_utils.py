@@ -38,6 +38,9 @@ def box_mask(size, border=0.05, blur=0.025):
         b = max(1, int(size * border))
         mask[b:-b, b:-b] = 1.0
         mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=max(1.0, size * blur))
+        # Make sure the mask fades to exactly 0 at the crop's edge (no visible seam)
+        mask[[0, -1], :] = 0.0
+        mask[:, [0, -1]] = 0.0
         mask.flags.writeable = False
         _box_mask_cache[key] = mask
     return mask
@@ -55,11 +58,11 @@ def paste_back(frame, crop, crop_mask, matrix):
     crop_h, crop_w = crop.shape[:2]
     inverse = cv2.invertAffineTransform(matrix)
 
-    # Bounding box of the crop's corners in frame coordinates
+    # Bounding box of the crop's corners in frame coordinates, plus 1px for the interpolation
     corners = np.array([[0, 0], [crop_w, 0], [0, crop_h], [crop_w, crop_h]], dtype=np.float32)
     points = corners @ inverse[:, :2].T + inverse[:, 2]
-    x1, y1 = np.floor(points.min(axis=0)).astype(int)
-    x2, y2 = np.ceil(points.max(axis=0)).astype(int)
+    x1, y1 = np.floor(points.min(axis=0)).astype(int) - 1
+    x2, y2 = np.ceil(points.max(axis=0)).astype(int) + 1
     x1, y1 = max(x1, 0), max(y1, 0)
     x2, y2 = min(x2, frame_w), min(y2, frame_h)
     if x2 <= x1 or y2 <= y1:

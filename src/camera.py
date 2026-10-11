@@ -60,7 +60,13 @@ class WebcamStream:
             return self.frame_id, self.frame
 
     def stop(self):
-        self.stopped = True
+        with self.condition:
+            self.stopped = True
+            self.condition.notify_all()
         if self.thread.is_alive():
             self.thread.join(timeout=2.0)
+        if self.thread.is_alive():
+            # Never release the device under a read that is still running; the process exit frees it
+            print("Warning: webcam did not stop in time, not releasing it.")
+            return
         self.stream.release()

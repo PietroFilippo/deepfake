@@ -254,8 +254,12 @@ def run_webcam(args, swapper, image_files, current_image_index):
             elif key == ord('r'):
                 if recorder:
                     print("Recording: Stopped")
-                    recorder.stop()
-                    recorder = None
+                    # Detached first, so a failing stop() is not retried on exit
+                    stopping, recorder = recorder, None
+                    try:
+                        stopping.stop()
+                    except Exception as e:
+                        print(f"Error finishing recording: {e}")
                 else:
                     print("Recording: Started")
                     out_path = args.out or os.path.join(OUTPUTS_DIR, f"output_{int(time.time())}.mp4")
@@ -268,13 +272,18 @@ def run_webcam(args, swapper, image_files, current_image_index):
                 show_ui = not show_ui
                 print(f"Interface: {'Visible' if show_ui else 'Hidden'}")
     finally:
-        # Finish an ongoing recording instead of losing it (and hanging on its audio thread)
-        if recorder:
-            recorder.stop()
-        webcam.stop()
-        if vcam:
-            vcam.close()
-        cv2.destroyAllWindows()
+        # Finish an ongoing recording instead of losing it (and hanging on its audio thread).
+        # Each step runs even if an earlier one fails.
+        try:
+            if recorder:
+                recorder.stop()
+        finally:
+            try:
+                webcam.stop()
+                if vcam:
+                    vcam.close()
+            finally:
+                cv2.destroyAllWindows()
 
 
 def main():

@@ -58,13 +58,21 @@ class AudioRecorder:
     def start(self):
         if not self.stream:
             return
-        # Audio is streamed straight to disk instead of being kept in memory
-        self.wave_file = wave.open(self.filename, 'wb')
-        self.wave_file.setnchannels(self.channels)
-        self.wave_file.setsampwidth(pyaudio.get_sample_size(self.format))
-        self.wave_file.setframerate(self.rate)
+        try:
+            self.stream.start_stream()
+            # Audio is streamed straight to disk instead of being kept in memory
+            self.wave_file = wave.open(self.filename, 'wb')
+            self.wave_file.setnchannels(self.channels)
+            self.wave_file.setsampwidth(pyaudio.get_sample_size(self.format))
+            self.wave_file.setframerate(self.rate)
+        except Exception as e:
+            print(f"Error starting audio recording: {e}. Recording without audio.")
+            if self.wave_file:
+                self.wave_file.close()
+                self.wave_file = None
+            self._close()
+            return
         self.recording = True
-        self.stream.start_stream()
         self.thread = threading.Thread(target=self._record, daemon=True)
         self.thread.start()
 
@@ -95,6 +103,10 @@ class AudioRecorder:
         # Wait for the reader thread before closing the stream it is reading from
         if self.thread:
             self.thread.join(timeout=2.0)
+            if self.thread.is_alive():
+                # The device is stuck in a read: leave it alone (daemon thread) and give up on the audio
+                print("Warning: microphone did not stop in time, recording without audio.")
+                return None
         self._close()
 
         if not self.wave_file:
@@ -112,6 +124,7 @@ class Recorder:
 
     def __init__(self, out_path, frame_size, nominal_fps=30.0):
         self.out_path = out_path
+        self.stopped = False
         # Unique temporary files next to the output, so nothing else gets overwritten
         out_dir = os.path.dirname(os.path.abspath(out_path))
         self.temp_video = _temp_path(out_dir, ".avi")
@@ -119,9 +132,12 @@ class Recorder:
 
         # High-quality MJPG intermediate: the video is only compressed for real (H.264) once, by ffmpeg
         self.writer = cv2.VideoWriter(self.temp_video, cv2.VideoWriter_fourcc(*'MJPG'), nominal_fps, frame_size)
-        self.writer.set(cv2.VIDEOWRITER_PROP_QUALITY, 95)
         if not self.writer.isOpened():
+            self.writer.release()
+            for path in (self.temp_video, self.temp_audio):
+                os.remove(path)
             raise RuntimeError(f"Could not create video file {self.temp_video}")
+        self.writer.set(cv2.VIDEOWRITER_PROP_QUALITY, 95)
 
         self.audio_recorder = AudioRecorder(self.temp_audio)
         self.audio_recorder.start()
@@ -134,6 +150,9 @@ class Recorder:
         self.frame_count += 1
 
     def stop(self):
+        if self.stopped:
+            return
+        self.stopped = True
         self.writer.release()
         elapsed = time.time() - self.start_time
         print("Processing audio.")
@@ -166,13 +185,11 @@ class Recorder:
                 os.remove(audio_path)
             print(f"Recording finished{' with audio' if audio_path else ''}: {self.out_path}")
         except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            # Keep the raw recording instead of losing it
-            fallback = os.path.splitext(self.out_path)[0] + ".avi"
-            os.replace(self.temp_video, fallback)
+            # Keep the raw recording (its temp name is unique, so nothing gets overwritten)
             if isinstance(e, FileNotFoundError):
                 print("Warning: ffmpeg not found.")
             else:
                 print(f"Error merging audio: {e.stderr.decode(errors='replace').strip()}")
-            print(f"Saved the raw recording (no audio, nominal 30 FPS) to: {fallback}")
+            print(f"Raw recording kept at: {self.temp_video} (no audio, nominal 30 FPS)")
             if audio_path:
                 print(f"Audio kept at: {audio_path}")
