@@ -24,6 +24,8 @@ class LivePipeline:
         # Set while a model's TensorRT engine is built: the GPU is left to the build (much faster, and
         # TensorRT picks better kernels when its timings aren't disturbed); the camera keeps showing
         self.paused = False
+        self.mirror = False         # flip left-right
+        self.flip_vertical = False  # flip upside down
 
         self._commands = queue.Queue()
         self._lock = threading.Lock()
@@ -201,6 +203,8 @@ class LivePipeline:
                 if frame_id == last_frame_id:
                     continue
                 last_frame_id = frame_id
+                if self.mirror or self.flip_vertical:
+                    frame = cv2.flip(frame, -1 if self.mirror and self.flip_vertical else int(self.mirror))
 
                 swapper = self.swapper
                 if self.swap_enabled and not self.paused and swapper.source_latent is not None:

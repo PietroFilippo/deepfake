@@ -122,14 +122,14 @@ Double-click **`Deepfake.bat`** (or run `python app.py`). The first time, the ap
 
 Press **Tab** (or **F1**) to open the settings overlay on top of the live video. Everything applies immediately:
 - **Source face**: thumbnails of the images in your faces folder (click one), or any other image
-- **Face swap**: swap model (switch between inswapper and HyperSwap at any time), pixel boost for the live view and for files, face mask
+- **Face swap**: swap model (switch between inswapper and HyperSwap at any time), pixel boost for the live view and for files, face mask, fringe (see [Fringe](#fringe-hair-over-the-forehead))
 - **Face enhancer**: on/off, model (GFPGAN / GPEN) and blend
 - **Face detection**: landmark smoothing, detector size, detection interval
-- **Camera**: camera index, resolution, FPS, virtual camera (OBS), worker threads
+- **Camera**: camera index, resolution, FPS, mirror / flip upside down, virtual camera (OBS), worker threads
 - **Recording and files**: record the live output, process an image/video/GIF (with progress and cancel), open the outputs folder
 - **Folders**: models, faces and outputs folders
 
-Keys: **Tab/F1** settings · **Esc** close settings · **F11** fullscreen · **N/P** next/previous face · **X** swap on/off · **E** enhancer · **B** pixel boost · **M** face mask · **R** record · **U** HUD · **Q** quit
+Keys: **Tab/F1** settings · **Esc** close settings · **F11** fullscreen · **N/P** next/previous face · **X** swap on/off · **E** enhancer · **B** pixel boost · **M** face mask · **F** fringe · **R** record · **U** HUD · **Q** quit
 
 The first time a model is used, TensorRT builds an optimized engine for it (about 1-4 minutes per model). This happens in a separate background process, so the app keeps responding and the live view keeps running with the previous model; afterwards the model loads in under a second, so switching models (or starting the app) is quick.
 
@@ -207,6 +207,7 @@ python main.py --source <image> [options]
 #### Quality Arguments
 - `--pixel-boost`: Resolution the face is swapped at: `128`, `256`, `384` or `512` (default: the model's own resolution). See [Improving Quality](#improving-quality).
 - `--face-mask`: `box` (default) or `parser`. `parser` keeps hair, hands and glasses that cover the target face (slower).
+- `--fringe`: `blend` (default), `hide` or `show`. See [Fringe](#fringe-hair-over-the-forehead).
 - `--enhance`: Enables the face enhancer by default on startup (can be used with videos and images)
 - `--enhancer-model`: Enhancer model (default: `models/GFPGANv1.4.onnx`, e.g. `models/GPEN-BFR-512.onnx`)
 - `--enhance-blend`: How much of the enhanced face is mixed in, 0-1 (default: 0.8). Lower = less "plastic".
@@ -222,6 +223,7 @@ python main.py --source <image> [options]
 - `--camera`: Webcam index (default: 0).
 - `--width` / `--height`: Requested webcam resolution (default: 1920x1080).
 - `--camera-fps`: Requests a specific FPS from the webcam (default: 30).
+- `--mirror` / `--flip`: Flip the webcam image left-right / upside down.
 - `--virtual-cam`: Enables output to OBS Virtual Camera (useful for Discord, Zoom, etc.).
 
 ### Controls (Command-Line Webcam Mode)
@@ -250,6 +252,13 @@ python main.py --source <image> [options]
 
 2. **Face enhancer** (`--enhance`, or the `e` key): restores detail with GFPGAN (or GPEN with `--enhancer-model models/GPEN-BFR-512.onnx`). Use `--enhance-blend 0.5` if the result looks too "plastic".
 3. **Parser mask** (`--face-mask parser`, or the `m` key): keeps whatever is in front of the target face (hair, hands, glasses).
+
+### Fringe (hair over the forehead)
+
+When the source photo has a fringe (bangs), the swap models only half reproduce it, so it looks see-through on your forehead. The **Fringe** option (`F` key, `--fringe`) decides what happens there:
+- **Model default** (`blend`): as the model makes it.
+- **Hide** (`hide`): the swap stops just above the eyebrows, so your own forehead and hair stay as they are: no see-through hair.
+- **Show** (`show`): the photo's fringe is cut out (with the face parser, `face_parser.onnx`), matched to your brightness and laid fully over your forehead, following your head. It keeps the photo's hair color, so it looks best when the colors are similar.
 
 Landmark smoothing is on by default: the detector's 5 landmarks jitter by a few pixels from frame to frame, which makes the swapped face shimmer. Faces are followed between frames and smoothed with a One Euro filter (strong smoothing while still, almost no lag while moving), which removed about a third of the jitter on test videos without measurable lag.
 

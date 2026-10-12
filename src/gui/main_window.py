@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 
-from PySide6.QtCore import QObject, QPointF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QFileSystemWatcher, QObject, QPointF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QImageReader, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
                                QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QMessageBox,
@@ -17,8 +17,11 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, 
 # The face swap modules (ONNX Runtime, insightface, ...) are imported in the background, so the window
 # opens right away with a loading screen
 from .pipeline import LivePipeline
-from .settings import (ENHANCER_MODEL_KEYS, FACE_MASKS, IMAGE_EXTENSIONS, PARSER_MODEL_NAME, PIXEL_BOOST_SIZES,
-                       RESOLUTIONS, SWAP_MODEL_KEYS, Settings, list_images, list_models)
+from .settings import (ENHANCER_MODEL_KEYS, FACE_MASKS, FRINGE_MODES, IMAGE_EXTENSIONS, PARSER_MODEL_NAME,
+                       PIXEL_BOOST_SIZES, RESOLUTIONS, SWAP_MODEL_KEYS, Settings, list_images, list_models)
+
+FRINGE_LABELS = {'blend': "Model default", 'hide': "Hide (keep your forehead)",
+                 'show': "Show (the photo's fringe)"}
 
 VIDEO_EXTENSIONS = ('.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v')
 PANEL_WIDTH = 420
@@ -215,6 +218,12 @@ class MainWindow(QWidget):
         self.bridge.shutdown_done.connect(self._on_shutdown_done)
 
         self._add_shortcuts()
+        # The faces list follows the folder (files added or removed while the app runs)
+        self.faces_watcher = QFileSystemWatcher(self)
+        self.faces_watcher.directoryChanged.connect(lambda _: self._faces_refresh.start())
+        self._faces_refresh = QTimer(self, singleShot=True, interval=500)
+        self._faces_refresh.timeout.connect(self._load_faces)
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(15)
@@ -259,7 +268,7 @@ class MainWindow(QWidget):
                 s.model_file(s.swap_model), det_size=(s.det_size, s.det_size), max_workers=s.max_workers,
                 pixel_boost=s.pixel_boost, face_mask=s.face_mask,
                 enhancer_model=s.model_file(s.enhancer_model),
-                enhance_blend=s.enhance_blend, smoothing=s.smoothing,
+                enhance_blend=s.enhance_blend, smoothing=s.smoothing, fringe=s.fringe,
                 parser_model=parser_path if os.path.exists(parser_path) else None,
                 on_status=self.bridge.status.emit)
             swapper.enhancement_enabled = s.enhance and swapper.enhancer is not None
@@ -282,6 +291,7 @@ class MainWindow(QWidget):
         self.pipeline = LivePipeline(swapper, on_status=self.bridge.status.emit,
                                      on_recording_stopped=self.bridge.recording_stopped.emit)
         self.pipeline.detect_interval = s.detect_interval
+        self.pipeline.mirror, self.pipeline.flip_vertical = s.mirror, s.flip_vertical
         self.pipeline.start()
         self.pipeline.open_camera(s.camera_index, *s.resolution_size(), s.camera_fps)
         if s.virtual_cam:
@@ -372,6 +382,15 @@ class MainWindow(QWidget):
         self.mask_combo.addItems(FACE_MASKS)
         self.mask_combo.activated.connect(lambda _: self._set_face_mask(self.mask_combo.currentText()))
         form.addRow("Face mask  (M)", self.mask_combo)
+        self.fringe_combo = QComboBox()
+        for mode in FRINGE_MODES:
+            self.fringe_combo.addItem(FRINGE_LABELS[mode], mode)
+        self.fringe_combo.setToolTip("Hair over the forehead (e.g. a fringe in the source photo) only half comes "
+                                     "through the swap and looks see-through.\nHide: keep your own forehead and "
+                                     "hair above the eyebrows.\nShow: lay the photo's fringe over your forehead "
+                                     "(looks best with similar hair colors).")
+        self.fringe_combo.activated.connect(lambda _: self._set_fringe(self.fringe_combo.currentData()))
+        form.addRow("Fringe  (F)", self.fringe_combo)
         layout.addWidget(group)
 
         # Enhancer
@@ -429,6 +448,12 @@ class MainWindow(QWidget):
         self.vcam_check.setToolTip("Send the output to OBS Virtual Camera, for Discord, Zoom, Teams, ...")
         self.vcam_check.toggled.connect(self._set_virtual_cam)
         form.addRow(self.vcam_check)
+        self.mirror_check = QCheckBox("Mirror (flip left-right)")
+        self.mirror_check.toggled.connect(lambda on: self._set_flip('mirror', on))
+        form.addRow(self.mirror_check)
+        self.flip_check = QCheckBox("Flip upside down")
+        self.flip_check.toggled.connect(lambda on: self._set_flip('flip_vertical', on))
+        form.addRow(self.flip_check)
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(1, 8)
         self.workers_spin.valueChanged.connect(self._set_workers)
@@ -489,19 +514,20 @@ class MainWindow(QWidget):
         self.faces_list.setMinimumWidth(0)
 
         self._controls = [self.faces_list, self.faces_dir_button, add_button, self.swap_check, self.swap_combo,
-                          self.boost_combo, self.file_boost_combo, self.mask_combo, self.enhance_check,
-                          self.enhancer_combo, self.blend_slider, self.smooth_check, self.det_combo,
-                          self.interval_spin, apply_camera, self.vcam_check, self.workers_spin, self.record_button,
+                          self.boost_combo, self.file_boost_combo, self.mask_combo, self.fringe_combo,
+                          self.enhance_check, self.enhancer_combo, self.blend_slider, self.smooth_check,
+                          self.det_combo, self.interval_spin, apply_camera, self.vcam_check, self.mirror_check,
+                          self.flip_check, self.workers_spin, self.record_button,
                           self.process_button, self.models_button]
         return panel
 
     def _populate_controls(self):
         """Fills the panel from the settings and the loaded models (signals are blocked meanwhile)."""
         s = self.settings
-        widgets = [self.swap_combo, self.boost_combo, self.file_boost_combo, self.mask_combo, self.enhance_check,
-                   self.enhancer_combo, self.blend_slider, self.smooth_check, self.det_combo, self.interval_spin,
-                   self.camera_spin, self.res_combo, self.fps_combo, self.vcam_check, self.workers_spin,
-                   self.hud_check, self.swap_check]
+        widgets = [self.swap_combo, self.boost_combo, self.file_boost_combo, self.mask_combo, self.fringe_combo,
+                   self.enhance_check, self.enhancer_combo, self.blend_slider, self.smooth_check, self.det_combo,
+                   self.interval_spin, self.camera_spin, self.res_combo, self.fps_combo, self.vcam_check,
+                   self.mirror_check, self.flip_check, self.workers_spin, self.hud_check, self.swap_check]
         for w in widgets:
             w.blockSignals(True)
 
@@ -514,6 +540,8 @@ class MainWindow(QWidget):
         self.mask_combo.setCurrentText(s.face_mask)
         parser_ok = self.swapper is None or self.swapper.parser is not None
         self.mask_combo.model().item(FACE_MASKS.index('parser')).setEnabled(parser_ok)
+        self.fringe_combo.setCurrentIndex(FRINGE_MODES.index(s.fringe))
+        self.fringe_combo.model().item(FRINGE_MODES.index('show')).setEnabled(parser_ok)
 
         enhancers = list_models(s.models_dir, ENHANCER_MODEL_KEYS)
         self.enhancer_combo.clear()
@@ -532,6 +560,8 @@ class MainWindow(QWidget):
         self.res_combo.setCurrentText(s.resolution)
         self.fps_combo.setCurrentText(str(s.camera_fps))
         self.vcam_check.setChecked(s.virtual_cam)
+        self.mirror_check.setChecked(s.mirror)
+        self.flip_check.setChecked(s.flip_vertical)
         self.workers_spin.setValue(s.max_workers)
         self.hud_check.setChecked(s.show_hud)
         self.video.show_hud = s.show_hud
@@ -553,6 +583,13 @@ class MainWindow(QWidget):
         self.boost_combo.blockSignals(False)
 
     def _load_faces(self):
+        watched = self.faces_watcher.directories()
+        if watched != [self.settings.faces_dir]:
+            if watched:
+                self.faces_watcher.removePaths(watched)
+            if os.path.isdir(self.settings.faces_dir):
+                self.faces_watcher.addPath(self.settings.faces_dir)
+        scroll = self.faces_list.verticalScrollBar().value()
         self.faces_list.clear()
         for path in list_images(self.settings.faces_dir):
             reader = QImageReader(path)
@@ -569,6 +606,7 @@ class MainWindow(QWidget):
             if os.path.normcase(path) == os.path.normcase(self.settings.source_image):
                 item.setSelected(True)
                 self.faces_list.setCurrentItem(item)
+        self.faces_list.verticalScrollBar().setValue(scroll)
 
     def _set_controls_enabled(self, enabled):
         for w in self._controls:
@@ -729,6 +767,28 @@ class MainWindow(QWidget):
                 return
             self.swapper.face_mask = mask
             self._update_setting('face_mask', mask)
+
+    def _set_fringe(self, mode):
+        if mode == 'show' and self.swapper and self.swapper.parser is None:
+            self._set_status("Showing the photo's fringe needs the face parser (face_parser.onnx).")
+            mode = 'blend'
+        if self.swapper:
+            self.swapper.fringe = mode
+            if mode == 'show' and self.swapper.fringe_patch is None:
+                self._set_status("No fringe found in this face's photo.")
+        self._update_setting('fringe', mode)
+        self.fringe_combo.setCurrentIndex(FRINGE_MODES.index(mode))
+
+    def cycle_fringe(self):
+        modes = FRINGE_MODES
+        self._set_fringe(modes[(modes.index(self.settings.fringe) + 1) % len(modes)])
+
+    def _set_flip(self, name, enabled):
+        if self.pipeline:
+            setattr(self.pipeline, name, enabled)
+        if self.swapper:
+            self.swapper.tracker.reset()  # the faces jump to the other side
+        self._update_setting(name, enabled)
 
     def toggle_face_mask(self):
         mask = 'box' if self.settings.face_mask == 'parser' else 'parser'
@@ -928,6 +988,7 @@ class MainWindow(QWidget):
         key(Qt.Key_E, lambda: self.enhance_check.isEnabled() and self.enhance_check.toggle())
         key(Qt.Key_B, self.cycle_pixel_boost)
         key(Qt.Key_M, self.toggle_face_mask)
+        key(Qt.Key_F, self.cycle_fringe)
         key(Qt.Key_R, self.toggle_recording)
         key(Qt.Key_U, self.hud_check.toggle)
         key(Qt.Key_Q, self.close)
@@ -965,7 +1026,11 @@ class MainWindow(QWidget):
                 lines.append(("Swap paused: preparing a model for your GPU (first time only)", red))
             elif sw.source_face is None:
                 lines.append(("No source face (Tab)", red))
-            lines.append((f"{sw.model.name} | boost {sw.pixel_boost} | mask {sw.face_mask}", white))
+            line = f"{sw.model.name} | boost {sw.pixel_boost} | mask {sw.face_mask}"
+            if sw.fringe != 'blend':
+                none = sw.fringe == 'show' and sw.fringe_patch is None
+                line += f" | fringe {sw.fringe}" + (" (none in photo)" if none else "")
+            lines.append((line, white))
             lines.append((f"Enhancer: {'ON' if sw.enhancement_enabled else 'OFF'}",
                           green if sw.enhancement_enabled else white))
             if self.settings.source_image:

@@ -46,6 +46,39 @@ def box_mask(size, border=0.05, blur=0.025):
     return mask
 
 
+def _ramp(n, start, end):
+    """0 before `start`, 1 after `end` (fractions of n), smooth in between."""
+    t = np.clip((np.arange(n, dtype=np.float32) / n - start) / (end - start), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def forehead_cut_mask(size):
+    """
+    Swap mask that leaves out everything above the eyebrows (crop aligned with the ArcFace template,
+    where the eyebrows start ~30% from the top), so the camera's own forehead and hair stay visible.
+    """
+    key = ('forehead_cut', size)
+    mask = _box_mask_cache.get(key)
+    if mask is None:
+        mask = np.repeat(_ramp(size, 0.20, 0.27)[:, None], size, axis=1)
+        mask.flags.writeable = False
+        _box_mask_cache[key] = mask
+    return mask
+
+
+def fringe_zone(size):
+    """Where a fringe can be: from the top of the crop down to just above the eyes, across the forehead."""
+    key = ('fringe_zone', size)
+    mask = _box_mask_cache.get(key)
+    if mask is None:
+        rows = _ramp(size, 0.0, 0.03) * (1.0 - _ramp(size, 0.33, 0.38))
+        cols = _ramp(size, 0.10, 0.20) * (1.0 - _ramp(size, 0.80, 0.90))
+        mask = rows[:, None] * cols[None, :]
+        mask.flags.writeable = False
+        _box_mask_cache[key] = mask
+    return mask
+
+
 def paste_back(frame, crop, crop_mask, matrix):
     """
     Warps `crop` (cut out of `frame` with the affine `matrix`) back onto `frame`, in place,

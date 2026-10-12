@@ -13,12 +13,13 @@ SETTINGS_PATH = os.path.join(PROJECT_ROOT, 'settings.json')
 # Same as src.swapper (not imported, so the window can open before the heavy libraries are loaded)
 PIXEL_BOOST_SIZES = (128, 256, 384, 512)
 FACE_MASKS = ('box', 'parser')
+FRINGE_MODES = ('blend', 'hide', 'show')
 
 # Model files are recognized by name inside the models folder
 SWAP_MODEL_KEYS = ('inswapper', 'hyperswap')
 ENHANCER_MODEL_KEYS = ('gfpgan', 'gpen', 'restoreformer')
 PARSER_MODEL_NAME = 'face_parser.onnx'
-IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.jfif', '.png', '.bmp', '.webp', '.tif', '.tiff')
 RESOLUTIONS = ('640x480', '1280x720', '1920x1080')
 
 
@@ -35,12 +36,15 @@ class Settings:
     pixel_boost: int = 128
     file_pixel_boost: int = 512
     face_mask: str = 'box'
+    fringe: str = 'blend'
     smoothing: bool = True
     detect_interval: int = 1
     det_size: int = 640
     camera_index: int = 0
     resolution: str = '1920x1080'
     camera_fps: int = 30
+    mirror: bool = False
+    flip_vertical: bool = False
     max_workers: int = 4
     virtual_cam: bool = False
     show_hud: bool = True
@@ -76,7 +80,8 @@ class Settings:
             'enhance_blend': lambda v: math.isfinite(v) and 0.0 <= v <= 1.0,
             'pixel_boost': lambda v: v in PIXEL_BOOST_SIZES,
             'file_pixel_boost': lambda v: v in PIXEL_BOOST_SIZES,
-            'face_mask': lambda v: v in ('box', 'parser'),
+            'face_mask': lambda v: v in FACE_MASKS,
+            'fringe': lambda v: v in FRINGE_MODES,
             'detect_interval': lambda v: 1 <= v <= 10,
             'det_size': lambda v: v in (320, 480, 640),
             'camera_index': lambda v: 0 <= v <= 9,

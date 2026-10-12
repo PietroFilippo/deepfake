@@ -15,6 +15,7 @@ class FaceParser:
     # 14 neck | 15 neck_l | 16 cloth | 17 hair | 18 hat
     # Only include the face regions that the swap/enhance should affect.
     FACE_CLASSES = (1, 2, 3, 4, 5, 10, 11, 12, 13)
+    HAIR_CLASS = 17
 
     def __init__(self, model_path=None, providers=None, on_status=None):
         model_path = model_path or default_model_path("face_parser.onnx")
@@ -29,20 +30,23 @@ class FaceParser:
         self._face_class_arr = np.array(self.FACE_CLASSES, dtype=np.uint8)
         print("[FaceParser] Loaded.")
 
-    def parse(self, face_bgr):
-        """Mask (H, W) float32 in [0,1]. 1 = face region to be blended."""
-        h, w = face_bgr.shape[:2]
-        if h == 0 or w == 0:
-            return np.zeros((max(h, 1), max(w, 1)), dtype=np.float32)
-
+    def labels(self, face_bgr):
+        """Class of every pixel (512x512 uint8, CelebAMask-HQ classes above)."""
         img = cv2.resize(face_bgr, (512, 512), interpolation=cv2.INTER_LINEAR)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         img = (img - self.MEAN) / self.STD
         img = np.transpose(img, (2, 0, 1))[None, ...].astype(np.float32)
 
         out = self.session.run([self.output_name], {self.input_name: img})[0]
-        parsing = out[0].argmax(axis=0).astype(np.uint8)  # (512,512)
+        return out[0].argmax(axis=0).astype(np.uint8)
 
+    def parse(self, face_bgr):
+        """Mask (H, W) float32 in [0,1]. 1 = face region to be blended."""
+        h, w = face_bgr.shape[:2]
+        if h == 0 or w == 0:
+            return np.zeros((max(h, 1), max(w, 1)), dtype=np.float32)
+
+        parsing = self.labels(face_bgr)
         mask = np.isin(parsing, self._face_class_arr).astype(np.float32)
         mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_LINEAR)
 

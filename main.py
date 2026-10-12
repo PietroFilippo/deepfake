@@ -5,12 +5,12 @@ import os
 import sys
 from collections import deque
 from src.camera import WebcamStream
-from src.swapper import FaceSwapper, PIXEL_BOOST_SIZES, FACE_MASKS
+from src.swapper import FaceSwapper, PIXEL_BOOST_SIZES, FACE_MASKS, FRINGE_MODES
 from src.recorder import Recorder
 from src.media import process_image, process_video, process_gif
 from src.utils import OUTPUTS_DIR, model_path
 
-IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.jfif', '.png', '.bmp', '.webp', '.tif', '.tiff')
 
 
 def parse_args():
@@ -33,6 +33,10 @@ def parse_args():
     quality.add_argument("--face-mask", choices=FACE_MASKS, default="box",
                          help="'parser' keeps hair, hands and glasses of the target in front of the face "
                               "(slower). Default: box.")
+    quality.add_argument("--fringe", choices=FRINGE_MODES, default="blend",
+                         help="Hair over the forehead (e.g. a fringe in the source photo, which looks see-through "
+                              "after the swap): 'hide' keeps your own forehead above the eyebrows, 'show' lays the "
+                              "photo's fringe over it. Default: blend (as the model makes it).")
     quality.add_argument("--enhance", action="store_true", help="Enable face enhancement by default")
     quality.add_argument("--enhancer-model", default=model_path("GFPGANv1.4.onnx"),
                          help="Face enhancer ONNX model (e.g. models/GFPGANv1.4.onnx or models/GPEN-BFR-512.onnx)")
@@ -51,6 +55,8 @@ def parse_args():
     performance.add_argument("--width", type=int, default=1920, help="Requested webcam width. Default: 1920.")
     performance.add_argument("--height", type=int, default=1080, help="Requested webcam height. Default: 1080.")
     performance.add_argument("--camera-fps", type=int, default=30, help="Desired webcam FPS.")
+    performance.add_argument("--mirror", action="store_true", help="Flip the webcam image left-right.")
+    performance.add_argument("--flip", action="store_true", help="Flip the webcam image upside down.")
     performance.add_argument("--virtual-cam", action="store_true", help="Enable output to a virtual camera (OBS Virtual Camera).")
 
     args = parser.parse_args()
@@ -169,6 +175,8 @@ def run_webcam(args, swapper, image_files, current_image_index):
                     break
                 continue
             last_frame_id = frame_id
+            if args.mirror or args.flip:
+                frame = cv2.flip(frame, -1 if args.mirror and args.flip else int(args.mirror))
 
             if swap_enabled:
                 # 1. Submit the frame to the worker pool
@@ -307,7 +315,7 @@ def main():
         swapper = FaceSwapper(args.model, det_size=(det_size, det_size), max_workers=args.max_workers,
                               pixel_boost=args.pixel_boost, face_mask=args.face_mask,
                               enhancer_model=args.enhancer_model, enhance_blend=args.enhance_blend,
-                              smoothing=not args.no_smoothing)
+                              smoothing=not args.no_smoothing, fringe=args.fringe)
         swapper.set_source_image(source_path)
         if args.enhance:
             if swapper.enhancer:
