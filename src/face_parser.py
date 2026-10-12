@@ -1,8 +1,8 @@
 import cv2
 import numpy as np
-import onnxruntime
 import os
-from .utils import get_default_providers, model_path as default_model_path
+from .engines import create_session
+from .utils import model_path as default_model_path
 
 class FaceParser:
     # ImageNet normalization (standard CelebAMask-HQ BiSeNet training)
@@ -16,16 +16,13 @@ class FaceParser:
     # Only include the face regions that the swap/enhance should affect.
     FACE_CLASSES = (1, 2, 3, 4, 5, 10, 11, 12, 13)
 
-    def __init__(self, model_path=None, providers=None):
+    def __init__(self, model_path=None, providers=None, on_status=None):
         model_path = model_path or default_model_path("face_parser.onnx")
-        if providers is None:
-            providers = get_default_providers()
-
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"face_parser model not found at {model_path}")
 
         print(f"[FaceParser] Loading {model_path}")
-        self.session = onnxruntime.InferenceSession(model_path, providers=providers)
+        self.session = create_session(model_path, on_status=on_status, providers=providers)
         self.input_name = self.session.get_inputs()[0].name
         # The first output is the main logit; the others are auxiliary heads
         self.output_name = self.session.get_outputs()[0].name

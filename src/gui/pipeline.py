@@ -21,6 +21,9 @@ class LivePipeline:
         self.on_recording_stopped = on_recording_stopped
         self.detect_interval = 1
         self.swap_enabled = True
+        # Set while a model's TensorRT engine is built: the GPU is left to the build (much faster, and
+        # TensorRT picks better kernels when its timings aren't disturbed); the camera keeps showing
+        self.paused = False
 
         self._commands = queue.Queue()
         self._lock = threading.Lock()
@@ -29,6 +32,7 @@ class LivePipeline:
         self._thread = threading.Thread(target=self._run, daemon=True, name="LivePipeline")
 
         self.webcam = None
+        self.camera_error = None
         self.vcam = None
         self.vcam_wanted = False
         self.vcam_fps = 30
@@ -109,8 +113,10 @@ class LivePipeline:
         self.on_status(f"Opening camera {index} ({width}x{height} @ {fps} FPS)...")
         try:
             self.webcam = WebcamStream(src=index, width=width, height=height, fps=fps).start()
+            self.camera_error = None
         except RuntimeError as e:
-            self.on_status(f"Error: {e}. Choose another camera in the settings (Tab).")
+            self.camera_error = f"{e}. Choose another camera in the settings (Tab)."
+            self.on_status(f"Error: {self.camera_error}")
             return
         w, h = self.webcam.size
         self.on_status(f"Camera {index}: {w}x{h}")
@@ -197,7 +203,7 @@ class LivePipeline:
                 last_frame_id = frame_id
 
                 swapper = self.swapper
-                if self.swap_enabled and swapper.source_latent is not None:
+                if self.swap_enabled and not self.paused and swapper.source_latent is not None:
                     try:
                         pending.append(swapper.process_frame_async(frame, detect_interval=self.detect_interval))
                     except Exception as e:

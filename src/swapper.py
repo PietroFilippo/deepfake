@@ -1,8 +1,6 @@
 import cv2
-import insightface
 import numpy as np
 import onnx
-import onnxruntime
 import os
 import threading
 import time
@@ -10,8 +8,11 @@ import concurrent.futures
 from collections import namedtuple
 from onnx import numpy_helper
 from insightface.app.common import Face
-from insightface.utils import face_align
-from .utils import setup_dll_directories, get_default_providers, model_path as default_model_path, read_image
+from insightface.model_zoo.arcface_onnx import ArcFaceONNX
+from insightface.model_zoo.retinaface import RetinaFace
+from insightface.utils import ensure_available, face_align
+from .engines import cached_array, create_session
+from .utils import setup_dll_directories, model_path as default_model_path, read_image
 from .face_utils import box_mask, paste_back
 from .enhancer import FaceEnhancer
 from .face_parser import FaceParser
@@ -37,12 +38,12 @@ class SwapModel:
     Both use the same ArcFace 5-point alignment, so the rest of the pipeline is shared.
     """
 
-    def __init__(self, model_path, providers):
+    def __init__(self, model_path, providers=None, on_status=None):
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model not found at {model_path}")
         self.path = model_path
         self.name = os.path.basename(model_path)
-        self.session = onnxruntime.InferenceSession(model_path, providers=providers)
+        self.session = create_session(model_path, on_status=on_status, providers=providers)
         inputs = self.session.get_inputs()
         target = next(i for i in inputs if len(i.shape) == 4)
         source = next(i for i in inputs if len(i.shape) == 2)
@@ -54,7 +55,8 @@ class SwapModel:
             self.type = 'inswapper'
             self.mean, self.std = 0.0, 1.0
             # The identity projection matrix is stored as the graph's last initializer
-            self.emap = numpy_helper.to_array(onnx.load(model_path).graph.initializer[-1])
+            self.emap = cached_array(model_path, 'emap',
+                                     lambda: numpy_helper.to_array(onnx.load(model_path).graph.initializer[-1]))
         elif self.size == 256 and 'mask' in outputs:
             self.type = 'hyperswap'
             self.mean, self.std = 0.5, 0.5
@@ -93,23 +95,31 @@ class SwapModel:
 class FaceSwapper:
     def __init__(self, model_path, providers=None, det_size=(640, 640), max_workers=None,
                  pixel_boost=None, face_mask='box', enhancer_model=None, enhance_blend=0.8,
-                 parser_model=None, smoothing=True):
-        if providers is None:
-            providers = get_default_providers()
+                 parser_model=None, smoothing=True, on_status=None):
+        # providers=None: TensorRT with prebuilt engines (see engines.py), with CUDA/CPU fallback
         self.providers = providers
         self.det_size = det_size
+        self.on_status = on_status or print
+        status = self.on_status
 
-        print(f"[FaceSwapper] Initializing FaceAnalysis with providers: {self.providers} and det_size: {self.det_size}")
-
-        # Face detection app. Only detection (target faces) and recognition (source identity)
-        # are needed; the 106/68-point landmark and gender/age models are skipped.
-        self.app = insightface.app.FaceAnalysis(name='buffalo_l', allowed_modules=['detection', 'recognition'],
-                                                providers=self.providers)
-        self.app.prepare(ctx_id=0, det_size=self.det_size)
+        # Face detector (target faces) and recognizer (source identity) from insightface's buffalo_l
+        # pack. Its landmark and gender/age models aren't needed, so they are never loaded.
+        model_dir = ensure_available('models', 'buffalo_l', root='~/.insightface')
+        det_path = os.path.join(model_dir, 'det_10g.onnx')
+        rec_path = os.path.join(model_dir, 'w600k_r50.onnx')
+        status("Loading the face detector...")
+        self.detector = RetinaFace(model_file=det_path,
+                                   session=create_session(det_path, on_status=status, providers=providers))
+        self.detector.prepare(ctx_id=0, input_size=tuple(det_size), det_thresh=0.5)
+        status("Loading the face recognizer...")
+        self.recognizer = ArcFaceONNX(model_file=rec_path,
+                                      session=create_session(rec_path, on_status=status, providers=providers))
+        self.recognizer.prepare(ctx_id=0)
 
         self.source_face = None
+        status(f"Loading the swap model {os.path.basename(model_path)}...")
         # (model, latent) are always replaced together so workers never see a mismatched pair
-        self._active = (SwapModel(model_path, self.providers), None)
+        self._active = (SwapModel(model_path, providers, on_status=status), None)
         self._lock = threading.Lock()
 
         # Requested pixel boost; each model uses the closest size it supports
@@ -118,7 +128,8 @@ class FaceSwapper:
 
         # Face parser for the anatomical masks (optional for the swap, used by the enhancer)
         try:
-            self.parser = FaceParser(parser_model)
+            status("Loading the face parser...")
+            self.parser = FaceParser(parser_model, providers=providers, on_status=status)
         except Exception as e:
             print(f"[FaceSwapper] Warning: FaceParser unavailable ({e}). Using box masks.")
             self.parser = None
@@ -131,6 +142,7 @@ class FaceSwapper:
             enhancer_model = default_model_path("GFPGANv1.4.onnx")
         if enhancer_model:
             try:
+                status(f"Loading the face enhancer {os.path.basename(enhancer_model)}...")
                 self.set_enhancer_model(enhancer_model)
             except Exception as e:
                 print(f"[FaceSwapper] Warning: Could not load FaceEnhancer: {e}")
@@ -187,14 +199,15 @@ class FaceSwapper:
         Loads another swap model (can take a while: TensorRT builds an engine the first time)
         and switches to it. Frames already submitted finish with the previous model.
         """
-        model = SwapModel(model_path, self.providers)
+        model = SwapModel(model_path, self.providers, on_status=self.on_status)
         with self._lock:
             latent = model.latent(self.source_face) if self.source_face is not None else None
             self._active = (model, latent)
 
     def set_enhancer_model(self, model_path):
         """Loads another enhancer model (GFPGAN/GPEN style) and switches to it."""
-        enhancer = FaceEnhancer(model_path, parser=self.parser, blend=self.enhance_blend)
+        enhancer = FaceEnhancer(model_path, providers=self.providers, parser=self.parser, blend=self.enhance_blend,
+                                on_status=self.on_status)
         self.enhancer = enhancer
 
     def set_enhance_blend(self, blend):
@@ -213,12 +226,13 @@ class FaceSwapper:
         if img is None:
             raise ValueError(f"Could not read the source image: {source_img_path}")
 
-        faces = self.app.get(img)
+        faces = self.detect_faces(img)
         if len(faces) == 0:
             raise ValueError("No face detected in the source image")
 
-        # Use the largest face
+        # Use the largest face, and compute its identity embedding
         source_face = max(faces, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]))
+        self.recognizer.get(img, source_face)
 
         # The identity vector is computed once here instead of for every face in every frame
         with self._lock:
@@ -238,8 +252,8 @@ class FaceSwapper:
 
     def detect_faces(self, frame, input_size=None):
         """Runs only the face detector. Returns Face objects with bbox, kps and det_score."""
-        bboxes, kpss = self.app.det_model.detect(frame, input_size=tuple(input_size or self.det_size),
-                                                 max_num=0, metric='default')
+        bboxes, kpss = self.detector.detect(frame, input_size=tuple(input_size or self.det_size),
+                                            max_num=0, metric='default')
         if kpss is None:
             return []
         return [Face(bbox=bbox[:4], kps=kps, det_score=bbox[4]) for bbox, kps in zip(bboxes, kpss)]

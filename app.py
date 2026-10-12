@@ -51,6 +51,11 @@ def self_test():
 
 
 def main():
+    # Builder process started by src/engines.py: builds one TensorRT engine and exits
+    if len(sys.argv) == 5 and sys.argv[1] == '--build-engine':
+        from src.engines import build_engine_main
+        return build_engine_main(sys.argv[2], sys.argv[3], sys.argv[4] == '1')
+
     from src.utils import PROJECT_ROOT
 
     # pythonw.exe and the packaged app have no console: keep a log file for troubleshooting

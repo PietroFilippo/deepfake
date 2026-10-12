@@ -10,7 +10,9 @@ from ..utils import PROJECT_ROOT, MODELS_DIR, OUTPUTS_DIR
 
 SETTINGS_PATH = os.path.join(PROJECT_ROOT, 'settings.json')
 
-PIXEL_BOOST_SIZES = (128, 256, 384, 512)  # same as src.swapper (not imported to keep this module light)
+# Same as src.swapper (not imported, so the window can open before the heavy libraries are loaded)
+PIXEL_BOOST_SIZES = (128, 256, 384, 512)
+FACE_MASKS = ('box', 'parser')
 
 # Model files are recognized by name inside the models folder
 SWAP_MODEL_KEYS = ('inswapper', 'hyperswap')

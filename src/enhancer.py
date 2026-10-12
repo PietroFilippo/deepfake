@@ -1,28 +1,24 @@
 import cv2
 import numpy as np
-import onnxruntime
 import os
-from .utils import get_default_providers, model_path as default_model_path
+from .engines import create_session
+from .utils import model_path as default_model_path
 from .face_utils import box_mask, estimate_ffhq_matrix, paste_back
 
 
 class FaceEnhancer:
-    def __init__(self, model_path=None, providers=None, parser=None, blend=0.8):
+    def __init__(self, model_path=None, providers=None, parser=None, blend=0.8, on_status=None):
         """
         Face restoration with GFPGAN-style ONNX models (GFPGANv1.4, GPEN-BFR-512, ...):
         FFHQ-aligned 512x512 RGB input and output, values between -1 and 1.
 
         Args:
             model_path: Path to the ONNX model (default: models/GFPGANv1.4.onnx).
-            providers: ONNX Runtime providers (default: TensorRT FP32 > CUDA > CPU).
+            providers: ONNX Runtime providers (default: TensorRT FP32 > CUDA > CPU, prebuilt engine).
             parser: Optional FaceParser used to restrict the blend to the face region.
             blend: How much of the restored face is mixed in (0-1). Lower = less "plastic".
         """
         model_path = model_path or default_model_path("GFPGANv1.4.onnx")
-        # Try TensorRT in FP32 mode (full precision) for performance without artifacts
-        if providers is None:
-            providers = get_default_providers(fp16=False) # FP16 makes the face blurry
-        self.providers = providers
         self.parser = parser
         self.blend = float(np.clip(blend, 0.0, 1.0))
 
@@ -31,7 +27,8 @@ class FaceEnhancer:
 
         print(f"[FaceEnhancer] Loading enhancer model from {model_path}")
         try:
-            self.session = onnxruntime.InferenceSession(model_path, providers=self.providers)
+            # TensorRT in FP32 mode (full precision): FP16 makes the face blurry
+            self.session = create_session(model_path, fp16=False, on_status=on_status, providers=providers)
         except Exception as e:
             print(f"[FaceEnhancer] Error loading model: {e}")
             raise

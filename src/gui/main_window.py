@@ -13,11 +13,11 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, 
                                QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QMessageBox,
                                QProgressBar, QPushButton, QScrollArea, QSlider, QSpinBox, QVBoxLayout, QWidget)
 
-from ..media import process_gif, process_image, process_video
-from ..swapper import FACE_MASKS, PIXEL_BOOST_SIZES, FaceSwapper
+# The face swap modules (ONNX Runtime, insightface, ...) are imported in the background, so the window
+# opens right away with a loading screen
 from .pipeline import LivePipeline
-from .settings import (ENHANCER_MODEL_KEYS, IMAGE_EXTENSIONS, PARSER_MODEL_NAME, RESOLUTIONS, SWAP_MODEL_KEYS,
-                       Settings, list_images, list_models)
+from .settings import (ENHANCER_MODEL_KEYS, FACE_MASKS, IMAGE_EXTENSIONS, PARSER_MODEL_NAME, PIXEL_BOOST_SIZES,
+                       RESOLUTIONS, SWAP_MODEL_KEYS, Settings, list_images, list_models)
 
 VIDEO_EXTENSIONS = ('.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v')
 PANEL_WIDTH = 420
@@ -85,7 +85,16 @@ class VideoView(QWidget):
         self.recording = False
         self.status = ""
         self.hud_left = 12
+        # Shown while there is no video yet: (title, text, show spinner)
+        self.placeholder = ("Deepfake", "Starting...", True)
+        self.placeholder_since = time.time()
         self.setAttribute(Qt.WA_OpaquePaintEvent)
+
+    def set_placeholder(self, title, text, spinner=True):
+        if self.placeholder is None or self.placeholder[0] != title:
+            self.placeholder_since = time.time()
+        self.placeholder = (title, text, spinner)
+        self.update()
 
     def set_frame(self, frame):
         self.frame = frame
@@ -103,6 +112,8 @@ class VideoView(QWidget):
             painter.drawImage(self.rect().adjusted((self.width() - tw) // 2, (self.height() - th) // 2,
                                                    -((self.width() - tw + 1) // 2), -((self.height() - th + 1) // 2)),
                               image)
+        elif self.placeholder:
+            self._paint_placeholder(painter)
 
         font = QFont(self.font())
         font.setPointSize(11)
@@ -124,6 +135,39 @@ class VideoView(QWidget):
             self._draw_text(painter, self.hud_left, self.height() - 14, self.status, QColor(235, 235, 235))
         painter.end()
 
+    def _paint_placeholder(self, painter):
+        """Loading screen: title, current step, spinner and elapsed time, centered on the free area."""
+        title, text, spinner = self.placeholder
+        left = self.hud_left - 12
+        cx, cy = left + (self.width() - left) // 2, self.height() // 2
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        font = QFont(self.font())
+        font.setPointSize(22)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor(235, 235, 240))
+        painter.drawText(left, cy - 110, self.width() - left, 40, Qt.AlignHCenter, title)
+
+        if spinner:
+            # Rotating arc, 1 turn per second
+            angle = int((time.time() % 1.0) * 360 * 16)
+            painter.setPen(QPen(QColor(60, 60, 70), 5))
+            painter.drawEllipse(cx - 22, cy - 50, 44, 44)
+            painter.setPen(QPen(QColor(61, 142, 240), 5, Qt.SolidLine, Qt.RoundCap))
+            painter.drawArc(cx - 22, cy - 50, 44, 44, -angle, 100 * 16)
+
+        font.setPointSize(11)
+        font.setBold(False)
+        painter.setFont(font)
+        painter.setPen(QColor(200, 200, 210))
+        painter.drawText(left + 40, cy + 10, self.width() - left - 80, 60,
+                         Qt.AlignHCenter | Qt.TextWordWrap, text)
+        if spinner:
+            painter.setPen(QColor(140, 140, 150))
+            painter.drawText(left, cy + 72, self.width() - left, 24, Qt.AlignHCenter,
+                             f"{int(time.time() - self.placeholder_since)} s")
+
     @staticmethod
     def _draw_text(painter, x, y, text, color):
         painter.setPen(QColor(0, 0, 0, 200))
@@ -140,6 +184,7 @@ class MainWindow(QWidget):
         self.pipeline = None
         self.bridge = Bridge()
         self._loading_model = False
+        self._loading_enhancer = False
         self._file_job = None
         self._cancel_file = False
         self._recording = False
@@ -180,7 +225,7 @@ class MainWindow(QWidget):
             return False
         self._populate_controls()
         self._set_controls_enabled(False)
-        self._set_status("Loading models... (the first start builds TensorRT engines and can take a few minutes)")
+        self.video.set_placeholder("Loading", "Loading libraries...")
         threading.Thread(target=self._create_swapper, daemon=True).start()
         return True
 
@@ -207,13 +252,15 @@ class MainWindow(QWidget):
     def _create_swapper(self):
         s = self.settings
         try:
+            from ..swapper import FaceSwapper
             parser_path = s.model_file(PARSER_MODEL_NAME)
             swapper = FaceSwapper(
                 s.model_file(s.swap_model), det_size=(s.det_size, s.det_size), max_workers=s.max_workers,
                 pixel_boost=s.pixel_boost, face_mask=s.face_mask,
                 enhancer_model=s.model_file(s.enhancer_model),
                 enhance_blend=s.enhance_blend, smoothing=s.smoothing,
-                parser_model=parser_path if os.path.exists(parser_path) else None)
+                parser_model=parser_path if os.path.exists(parser_path) else None,
+                on_status=self.bridge.status.emit)
             swapper.enhancement_enabled = s.enhance and swapper.enhancer is not None
             source = s.source_image if os.path.isfile(s.source_image) else next(iter(list_images(s.faces_dir)), '')
             if source:
@@ -239,11 +286,13 @@ class MainWindow(QWidget):
         if s.virtual_cam:
             self.pipeline.set_virtual_cam(True, s.camera_fps)
         self._set_controls_enabled(True)
+        self.video.set_placeholder("Starting the camera", f"Camera {s.camera_index} ({s.resolution})")
         if not swapper.source_face:
             self._set_status("Pick a source face in the settings (Tab)")
             self.toggle_panel(True)
 
     def _on_swapper_failed(self, message):
+        self.video.set_placeholder("Could not load the models", message, spinner=False)
         QMessageBox.critical(self, "Could not load the models", message)
         self._set_status(f"Error: {message}. Choose another models folder in the settings.")
         self.models_button.setEnabled(True)
@@ -547,6 +596,8 @@ class MainWindow(QWidget):
 
     def _set_status(self, text):
         print(text)
+        if self.swapper is None and self.video.placeholder and self.video.placeholder[2]:
+            self.video.set_placeholder("Loading", text)  # the loading screen shows the current step
         self.video.status = text
         self._status_time = time.time()
         self.video.update()
@@ -598,7 +649,8 @@ class MainWindow(QWidget):
             return
         self._loading_model = True
         self.swap_combo.setEnabled(False)
-        self._set_status(f"Loading {name}... (the first time, TensorRT builds an engine: this can take a few minutes)")
+        self._set_status(f"Loading {name}...")
+        self._pause_for_build(self.settings.model_file(name), fp16=True)
 
         def work():
             try:
@@ -608,8 +660,16 @@ class MainWindow(QWidget):
                 self.bridge.swap_model_loaded.emit(name, False, f"Could not load {name}: {e}")
         threading.Thread(target=work, daemon=True).start()
 
+    def _pause_for_build(self, model_path, fp16):
+        """Pauses the live swap while a model that has never been used is prepared for the GPU."""
+        from ..engines import is_prepared
+        if self.pipeline and not is_prepared(model_path, fp16):
+            self.pipeline.paused = True
+
     def _on_swap_model_loaded(self, name, ok, message):
         self._loading_model = False
+        if self.pipeline and not self._loading_enhancer:
+            self.pipeline.paused = False
         self.swap_combo.setEnabled(True)
         self._set_status(message)
         if ok:
@@ -621,7 +681,9 @@ class MainWindow(QWidget):
         if not self.swapper or not name:
             return
         self.enhancer_combo.setEnabled(False)
+        self._loading_enhancer = True
         self._set_status(f"Loading enhancer {name}...")
+        self._pause_for_build(self.settings.model_file(name), fp16=False)
 
         def work():
             try:
@@ -632,6 +694,9 @@ class MainWindow(QWidget):
         threading.Thread(target=work, daemon=True).start()
 
     def _on_enhancer_loaded(self, name, ok, message):
+        self._loading_enhancer = False
+        if self.pipeline and not self._loading_model:
+            self.pipeline.paused = False
         self.enhancer_combo.setEnabled(True)
         self._set_status(message)
         if ok:
@@ -756,6 +821,7 @@ class MainWindow(QWidget):
         """Swaps the faces in an image, video or GIF in the background; the result goes to the outputs folder."""
         if not self.swapper or self._file_job or self._closing:
             return
+        from ..media import process_gif, process_image, process_video
         ext = os.path.splitext(path)[1].lower()
         if ext == '.gif':
             job, out_ext = process_gif, '.gif'
@@ -878,6 +944,10 @@ class MainWindow(QWidget):
             if number != self._last_frame_number and frame is not None:
                 self._last_frame_number = number
                 self.video.set_frame(frame)
+            elif self.video.frame is None and self.pipeline.camera_error:
+                self.video.set_placeholder("No camera image", self.pipeline.camera_error, spinner=False)
+        if self.video.frame is None and self.video.placeholder and self.video.placeholder[2]:
+            self.video.update()  # animate the loading spinner
         self._update_hud()
 
     def _update_hud(self):
@@ -888,6 +958,8 @@ class MainWindow(QWidget):
             lines.append((f"FPS: {self.pipeline.fps:.1f}", green))
             if not self.pipeline.swap_enabled:
                 lines.append(("Swap: OFF", red))
+            elif self.pipeline.paused:
+                lines.append(("Swap paused: preparing a model for your GPU (first time only)", red))
             elif sw.source_face is None:
                 lines.append(("No source face (Tab)", red))
             lines.append((f"{sw.model.name} | boost {sw.pixel_boost} | mask {sw.face_mask}", white))
@@ -902,7 +974,8 @@ class MainWindow(QWidget):
             self.record_button.setText("Stop recording  (R)" if self._recording else "Start recording  (R)")
         self.video.recording = recording
         # Status messages fade out after a while
-        if self.video.status and time.time() - self._status_time > 8 and not self._file_job and not self._loading_model:
+        busy = self._file_job or self._loading_model or self._loading_enhancer or self.swapper is None
+        if self.video.status and time.time() - self._status_time > 8 and not busy:
             self.video.status = ""
         if lines != self.video.hud_lines:
             self.video.hud_lines = lines
@@ -947,6 +1020,7 @@ def run():
     app.setStyle("Fusion")
     window = MainWindow(Settings.load())
     window.show()
+    app.processEvents()  # paint the loading screen before anything else
     if not window.start():
         return 0
     return app.exec()
