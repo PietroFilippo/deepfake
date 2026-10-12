@@ -52,18 +52,27 @@ def _ramp(n, start, end):
     return t * t * (3.0 - 2.0 * t)
 
 
-def forehead_cut_mask(size):
+def keep_forehead(crop, swapped):
     """
-    Swap mask that leaves out everything above the eyebrows (crop aligned with the ArcFace template,
-    where the eyebrows start ~30% from the top), so the camera's own forehead and hair stay visible.
+    Puts the camera's own forehead, eyebrows and hair (everything above the eyes) back into a swapped
+    crop aligned with the ArcFace template. Poisson blending (seamless cloning) keeps their texture
+    but adjusts the colors to meet the swapped face, so there is no seam and no see-through fringe
+    left at the edge.
     """
-    key = ('forehead_cut', size)
-    mask = _box_mask_cache.get(key)
-    if mask is None:
-        mask = np.repeat(_ramp(size, 0.20, 0.27)[:, None], size, axis=1)
-        mask.flags.writeable = False
-        _box_mask_cache[key] = mask
-    return mask
+    size = crop.shape[0]
+    key = ('forehead_region', size)
+    region = _box_mask_cache.get(key)
+    if region is None:
+        region = np.zeros((size, size), dtype=np.uint8)
+        region[:int(size * 0.335), int(size * 0.04):int(size * 0.96)] = 255  # above the eyes
+        _box_mask_cache[key] = region
+    pad = 8  # seamlessClone misbehaves when the region touches the image border
+    src = cv2.copyMakeBorder(crop, pad, pad, pad, pad, cv2.BORDER_REFLECT)
+    dst = cv2.copyMakeBorder(swapped, pad, pad, pad, pad, cv2.BORDER_REFLECT)
+    mask = cv2.copyMakeBorder(region, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=0)
+    x, y, w, h = cv2.boundingRect(mask)
+    out = cv2.seamlessClone(src, dst, mask, (x + w // 2, y + h // 2), cv2.NORMAL_CLONE)
+    return out[pad:-pad, pad:-pad]
 
 
 def fringe_zone(size):

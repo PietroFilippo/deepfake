@@ -387,8 +387,8 @@ class MainWindow(QWidget):
             self.fringe_combo.addItem(FRINGE_LABELS[mode], mode)
         self.fringe_combo.setToolTip("Hair over the forehead (e.g. a fringe in the source photo) only half comes "
                                      "through the swap and looks see-through.\nHide: keep your own forehead and "
-                                     "hair above the eyebrows.\nShow: lay the photo's fringe over your forehead "
-                                     "(looks best with similar hair colors).")
+                                     "eyebrows.\nShow: give you the photo's fringe; the swap model draws it in "
+                                     "your lighting, starting at your hairline.")
         self.fringe_combo.activated.connect(lambda _: self._set_fringe(self.fringe_combo.currentData()))
         form.addRow("Fringe  (F)", self.fringe_combo)
         layout.addWidget(group)

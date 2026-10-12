@@ -13,7 +13,7 @@ from insightface.model_zoo.retinaface import RetinaFace
 from insightface.utils import ensure_available, face_align
 from .engines import cached_array, create_session
 from .utils import setup_dll_directories, model_path as default_model_path, read_image
-from .face_utils import box_mask, forehead_cut_mask, fringe_zone, paste_back
+from .face_utils import box_mask, fringe_zone, keep_forehead, paste_back
 from .enhancer import FaceEnhancer
 from .face_parser import FaceParser
 from .tracking import FaceTracker
@@ -33,8 +33,8 @@ FRINGE_PATCH_SIZE = 256
 # Everything a worker needs to process one frame, captured when the frame is submitted, so
 # settings or models can change at any time without a frame mixing old and new state
 SwapJob = namedtuple('SwapJob', 'model latent crop_size face_mask enhancer enhance_blend fringe fringe_patch')
-# The source photo's fringe, aligned like the swap crop: image, opacity and the face's brightness
-FringePatch = namedtuple('FringePatch', 'image alpha brightness')
+# The source photo's fringe, aligned like the swap crop: image, opacity and the face's mean color
+FringePatch = namedtuple('FringePatch', 'image alpha face_color')
 
 
 class SwapModel:
@@ -253,11 +253,11 @@ class FaceSwapper:
         print("[FaceSwapper] Source face set")
 
     @staticmethod
-    def _brightness(crop):
-        """Mean brightness of the middle of the face (cheeks/nose) in an aligned crop."""
+    def _face_color(crop):
+        """Mean BGR color of the middle of the face (cheeks/nose) in an aligned crop."""
         s = crop.shape[0]
         region = crop[int(s * 0.45):int(s * 0.75), int(s * 0.3):int(s * 0.7)]
-        return float(cv2.cvtColor(region, cv2.COLOR_BGR2GRAY).mean())
+        return region.reshape(-1, 3).astype(np.float32).mean(axis=0) + 1.0
 
     def _make_fringe_patch(self, img, face):
         """Cuts the hair over the forehead out of the source photo (None without a fringe or a face parser)."""
@@ -271,7 +271,29 @@ class FaceSwapper:
         alpha = cv2.GaussianBlur(hair * fringe_zone(size), (0, 0), sigmaX=size * 0.006)
         if alpha.max() < 0.5 or (alpha > 0.5).mean() < 0.01:
             return None  # no fringe in this photo
-        return FringePatch(crop, alpha, max(self._brightness(crop), 1.0))
+        return FringePatch(crop, alpha, self._face_color(crop))
+
+    def _insert_fringe(self, crop, patch):
+        """
+        Puts the source photo's fringe into the target crop *before* the swap, over the bare forehead
+        only (it starts at the camera's own hairline and stays behind a hat). The swap model then
+        draws it like the camera's own hair: same lighting and sharpness, blended with the face.
+        Returns the new crop and the fringe's opacity.
+        """
+        size = crop.shape[0]
+        # Brightness and color cast of the camera's scene (per-channel gains from the faces' colors)
+        gains = np.clip(self._face_color(crop) / patch.face_color, 0.4, 2.5)
+        hair = cv2.resize(patch.image, (size, size), interpolation=cv2.INTER_AREA).astype(np.float32) * gains
+        labels = self.parser.labels(crop)
+        cover = np.isin(labels, (self.parser.HAIR_CLASS, self.parser.HAT_CLASS)).astype(np.float32)
+        cover = cv2.resize(cover, (size, size), interpolation=cv2.INTER_LINEAR)
+        k = max(3, int(size * 0.04)) | 1
+        cover = cv2.erode(cover, np.ones((k, k), np.uint8))  # tuck the fringe slightly under the hairline
+        cover = cv2.GaussianBlur(cover, (0, 0), sigmaX=size * 0.012)
+        alpha = cv2.resize(patch.alpha, (size, size), interpolation=cv2.INTER_LINEAR) * (1.0 - cover)
+        a = alpha[..., None]
+        crop = np.clip(hair * a + crop.astype(np.float32) * (1.0 - a), 0, 255).astype(np.uint8)
+        return crop, alpha.astype(np.float32)
 
     def job(self, pixel_boost=None):
         """Snapshot of the current models and settings for one frame."""
@@ -297,6 +319,10 @@ class FaceSwapper:
         n = size // model.size
         matrix = face_align.estimate_norm(face.kps, size)
         crop = cv2.warpAffine(frame, matrix, (size, size), borderMode=cv2.BORDER_REPLICATE)
+        target = crop
+        fringe_alpha = None
+        if job.fringe == 'show' and job.fringe_patch is not None and self.parser is not None:
+            crop, fringe_alpha = self._insert_fringe(crop, job.fringe_patch)
 
         if n == 1:
             swapped = model.run(crop, job.latent)
@@ -311,15 +337,18 @@ class FaceSwapper:
 
         swapped = np.clip(swapped * 255.0 + 0.5, 0, 255).astype(np.uint8)
 
-        mask = box_mask(size)
         if job.fringe == 'hide':
-            # Keep the camera's own forehead and hair (no half-transparent fringe)
-            mask = np.minimum(mask, forehead_cut_mask(size))
+            # The camera's own forehead and hair instead of the half-transparent fringe
+            swapped = keep_forehead(target, swapped)
+
+        mask = box_mask(size)
         if job.face_mask == 'parser' and self.parser is not None:
             # Parse the target crop so hair, hands and glasses in front of the face are kept
-            region = self.parser.parse(crop)
+            region = self.parser.parse(target)
             if region.any():
                 mask = np.minimum(mask, region)
+        if fringe_alpha is not None:
+            mask = np.maximum(mask, fringe_alpha)  # the fringe is shown fully, up to the hairline
 
         paste_back(frame, swapped, mask, matrix)
 
@@ -342,23 +371,7 @@ class FaceSwapper:
             except Exception as e:
                 print(f"[FaceSwapper] Enhancer error: {e}")
 
-        if job.fringe == 'show' and job.fringe_patch is not None:
-            for face in faces:
-                try:
-                    self._paste_fringe(res, face, job.fringe_patch)
-                except Exception as e:
-                    print(f"[FaceSwapper] Fringe error: {e}")
-
         return res
-
-    def _paste_fringe(self, frame, face, patch):
-        """Lays the source photo's fringe over the face (in place), matched to the frame's brightness."""
-        size = patch.image.shape[0]
-        matrix = face_align.estimate_norm(face.kps, size)
-        crop = cv2.warpAffine(frame, matrix, (size, size), borderMode=cv2.BORDER_REPLICATE)
-        gain = float(np.clip(self._brightness(crop) / patch.brightness, 0.6, 1.6))
-        hair = cv2.convertScaleAbs(patch.image, alpha=gain)
-        paste_back(frame, hair, patch.alpha, matrix)
 
     def process_frame(self, frame, tracker=None, timestamp=None, job=None, det_size=None):
         """

@@ -257,8 +257,10 @@ python main.py --source <image> [options]
 
 When the source photo has a fringe (bangs), the swap models only half reproduce it, so it looks see-through on your forehead. The **Fringe** option (`F` key, `--fringe`) decides what happens there:
 - **Model default** (`blend`): as the model makes it.
-- **Hide** (`hide`): the swap stops just above the eyebrows, so your own forehead and hair stay as they are: no see-through hair.
-- **Show** (`show`): the photo's fringe is cut out (with the face parser, `face_parser.onnx`), matched to your brightness and laid fully over your forehead, following your head. It keeps the photo's hair color, so it looks best when the colors are similar.
+- **Hide** (`hide`): your own forehead and eyebrows are put back over the swapped face with Poisson blending (their texture, the swapped face's colors at the edge), so there is no see-through hair and no seam.
+- **Show** (`show`): the photo's fringe is cut out (with the face parser, `face_parser.onnx`), adjusted to your scene's brightness and color, and placed on your bare forehead *before* the swap, starting at your own hairline (and behind a hat). The swap model then draws it like your own hair: same lighting and sharpness, fully opaque. It keeps the photo's hair color (a black-and-white photo gives a neutral brown).
+
+Cost per face at pixel boost 128 / 256: about +3 / +7 ms for Hide and +9 / +19 ms for Show.
 
 Landmark smoothing is on by default: the detector's 5 landmarks jitter by a few pixels from frame to frame, which makes the swapped face shimmer. Faces are followed between frames and smoothed with a One Euro filter (strong smoothing while still, almost no lag while moving), which removed about a third of the jitter on test videos without measurable lag.
 
