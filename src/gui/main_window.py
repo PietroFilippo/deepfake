@@ -3,6 +3,7 @@ Main window: live preview with a HUD, and a settings overlay toggled with Tab (o
 """
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -292,6 +293,8 @@ class MainWindow(QWidget):
             self.toggle_panel(True)
 
     def _on_swapper_failed(self, message):
+        if self._closing:
+            return
         self.video.set_placeholder("Could not load the models", message, spinner=False)
         QMessageBox.critical(self, "Could not load the models", message)
         self._set_status(f"Error: {message}. Choose another models folder in the settings.")
@@ -650,10 +653,10 @@ class MainWindow(QWidget):
         self._loading_model = True
         self.swap_combo.setEnabled(False)
         self._set_status(f"Loading {name}...")
-        self._pause_for_build(self.settings.model_file(name), fp16=True)
 
         def work():
             try:
+                self._pause_for_build(self.settings.model_file(name), fp16=True)
                 self.swapper.set_swap_model(self.settings.model_file(name))
                 self.bridge.swap_model_loaded.emit(name, True, f"Swap model: {name}")
             except Exception as e:
@@ -661,7 +664,7 @@ class MainWindow(QWidget):
         threading.Thread(target=work, daemon=True).start()
 
     def _pause_for_build(self, model_path, fp16):
-        """Pauses the live swap while a model that has never been used is prepared for the GPU."""
+        """Pauses the live swap while a model that has never been used is prepared for the GPU (any thread)."""
         from ..engines import is_prepared
         if self.pipeline and not is_prepared(model_path, fp16):
             self.pipeline.paused = True
@@ -683,10 +686,10 @@ class MainWindow(QWidget):
         self.enhancer_combo.setEnabled(False)
         self._loading_enhancer = True
         self._set_status(f"Loading enhancer {name}...")
-        self._pause_for_build(self.settings.model_file(name), fp16=False)
 
         def work():
             try:
+                self._pause_for_build(self.settings.model_file(name), fp16=False)
                 self.swapper.set_enhancer_model(self.settings.model_file(name))
                 self.bridge.enhancer_loaded.emit(name, True, f"Enhancer: {name}")
             except Exception as e:
@@ -1000,6 +1003,9 @@ class MainWindow(QWidget):
             self._set_status("Closing: finishing the recording / file...")
 
         def shutdown():
+            # Stop engine builds first (a TensorRT build can take minutes)
+            if 'src.engines' in sys.modules:
+                sys.modules['src.engines'].cancel_builds()
             if file_job:
                 file_job.join()  # a cancelled video is still finalized
             if pipeline:
