@@ -20,8 +20,7 @@ from .pipeline import LivePipeline
 from .settings import (ENHANCER_MODEL_KEYS, FACE_MASKS, FRINGE_MODES, IMAGE_EXTENSIONS, PARSER_MODEL_NAME,
                        PIXEL_BOOST_SIZES, RESOLUTIONS, SWAP_MODEL_KEYS, Settings, list_images, list_models)
 
-FRINGE_LABELS = {'blend': "Model default", 'hide': "Hide (keep your forehead)",
-                 'show': "Show (the photo's fringe)"}
+FRINGE_LABELS = {'blend': "Model default", 'hide': "Hide (keep your forehead)"}
 
 VIDEO_EXTENSIONS = ('.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v')
 PANEL_WIDTH = 420
@@ -387,8 +386,7 @@ class MainWindow(QWidget):
             self.fringe_combo.addItem(FRINGE_LABELS[mode], mode)
         self.fringe_combo.setToolTip("Hair over the forehead (e.g. a fringe in the source photo) only half comes "
                                      "through the swap and looks see-through.\nHide: keep your own forehead and "
-                                     "eyebrows.\nShow: give you the photo's fringe; the swap model draws it in "
-                                     "your lighting, starting at your hairline.")
+                                     "eyebrows instead.")
         self.fringe_combo.activated.connect(lambda _: self._set_fringe(self.fringe_combo.currentData()))
         form.addRow("Fringe  (F)", self.fringe_combo)
         layout.addWidget(group)
@@ -541,7 +539,6 @@ class MainWindow(QWidget):
         parser_ok = self.swapper is None or self.swapper.parser is not None
         self.mask_combo.model().item(FACE_MASKS.index('parser')).setEnabled(parser_ok)
         self.fringe_combo.setCurrentIndex(FRINGE_MODES.index(s.fringe))
-        self.fringe_combo.model().item(FRINGE_MODES.index('show')).setEnabled(parser_ok)
 
         enhancers = list_models(s.models_dir, ENHANCER_MODEL_KEYS)
         self.enhancer_combo.clear()
@@ -769,13 +766,8 @@ class MainWindow(QWidget):
             self._update_setting('face_mask', mask)
 
     def _set_fringe(self, mode):
-        if mode == 'show' and self.swapper and self.swapper.parser is None:
-            self._set_status("Showing the photo's fringe needs the face parser (face_parser.onnx).")
-            mode = 'blend'
         if self.swapper:
             self.swapper.fringe = mode
-            if mode == 'show' and self.swapper.fringe_patch is None:
-                self._set_status("No fringe found in this face's photo.")
         self._update_setting('fringe', mode)
         self.fringe_combo.setCurrentIndex(FRINGE_MODES.index(mode))
 
@@ -1028,8 +1020,7 @@ class MainWindow(QWidget):
                 lines.append(("No source face (Tab)", red))
             line = f"{sw.model.name} | boost {sw.pixel_boost} | mask {sw.face_mask}"
             if sw.fringe != 'blend':
-                none = sw.fringe == 'show' and sw.fringe_patch is None
-                line += f" | fringe {sw.fringe}" + (" (none in photo)" if none else "")
+                line += f" | fringe {sw.fringe}"
             lines.append((line, white))
             lines.append((f"Enhancer: {'ON' if sw.enhancement_enabled else 'OFF'}",
                           green if sw.enhancement_enabled else white))

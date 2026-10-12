@@ -35,8 +35,8 @@ def parse_args():
                               "(slower). Default: box.")
     quality.add_argument("--fringe", choices=FRINGE_MODES, default="blend",
                          help="Hair over the forehead (e.g. a fringe in the source photo, which looks see-through "
-                              "after the swap): 'hide' keeps your own forehead above the eyebrows, 'show' lays the "
-                              "photo's fringe over it. Default: blend (as the model makes it).")
+                              "after the swap): 'hide' keeps your own forehead and eyebrows. "
+                              "Default: blend (as the model makes it).")
     quality.add_argument("--enhance", action="store_true", help="Enable face enhancement by default")
     quality.add_argument("--enhancer-model", default=model_path("GFPGANv1.4.onnx"),
                          help="Face enhancer ONNX model (e.g. models/GFPGANv1.4.onnx or models/GPEN-BFR-512.onnx)")

@@ -46,12 +46,6 @@ def box_mask(size, border=0.05, blur=0.025):
     return mask
 
 
-def _ramp(n, start, end):
-    """0 before `start`, 1 after `end` (fractions of n), smooth in between."""
-    t = np.clip((np.arange(n, dtype=np.float32) / n - start) / (end - start), 0.0, 1.0)
-    return t * t * (3.0 - 2.0 * t)
-
-
 def keep_forehead(crop, swapped):
     """
     Puts the camera's own forehead, eyebrows and hair (everything above the eyes) back into a swapped
@@ -73,19 +67,6 @@ def keep_forehead(crop, swapped):
     x, y, w, h = cv2.boundingRect(mask)
     out = cv2.seamlessClone(src, dst, mask, (x + w // 2, y + h // 2), cv2.NORMAL_CLONE)
     return out[pad:-pad, pad:-pad]
-
-
-def fringe_zone(size):
-    """Where a fringe can be: from the top of the crop down to just above the eyes, across the forehead."""
-    key = ('fringe_zone', size)
-    mask = _box_mask_cache.get(key)
-    if mask is None:
-        rows = _ramp(size, 0.0, 0.03) * (1.0 - _ramp(size, 0.33, 0.38))
-        cols = _ramp(size, 0.10, 0.20) * (1.0 - _ramp(size, 0.80, 0.90))
-        mask = rows[:, None] * cols[None, :]
-        mask.flags.writeable = False
-        _box_mask_cache[key] = mask
-    return mask
 
 
 def paste_back(frame, crop, crop_mask, matrix):

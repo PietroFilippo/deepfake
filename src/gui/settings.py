@@ -13,7 +13,7 @@ SETTINGS_PATH = os.path.join(PROJECT_ROOT, 'settings.json')
 # Same as src.swapper (not imported, so the window can open before the heavy libraries are loaded)
 PIXEL_BOOST_SIZES = (128, 256, 384, 512)
 FACE_MASKS = ('box', 'parser')
-FRINGE_MODES = ('blend', 'hide', 'show')
+FRINGE_MODES = ('blend', 'hide')
 
 # Model files are recognized by name inside the models folder
 SWAP_MODEL_KEYS = ('inswapper', 'hyperswap')

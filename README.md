@@ -207,7 +207,7 @@ python main.py --source <image> [options]
 #### Quality Arguments
 - `--pixel-boost`: Resolution the face is swapped at: `128`, `256`, `384` or `512` (default: the model's own resolution). See [Improving Quality](#improving-quality).
 - `--face-mask`: `box` (default) or `parser`. `parser` keeps hair, hands and glasses that cover the target face (slower).
-- `--fringe`: `blend` (default), `hide` or `show`. See [Fringe](#fringe-hair-over-the-forehead).
+- `--fringe`: `blend` (default) or `hide`. See [Fringe](#fringe-hair-over-the-forehead).
 - `--enhance`: Enables the face enhancer by default on startup (can be used with videos and images)
 - `--enhancer-model`: Enhancer model (default: `models/GFPGANv1.4.onnx`, e.g. `models/GPEN-BFR-512.onnx`)
 - `--enhance-blend`: How much of the enhanced face is mixed in, 0-1 (default: 0.8). Lower = less "plastic".
@@ -255,12 +255,11 @@ python main.py --source <image> [options]
 
 ### Fringe (hair over the forehead)
 
-When the source photo has a fringe (bangs), the swap models only half reproduce it, so it looks see-through on your forehead. The **Fringe** option (`F` key, `--fringe`) decides what happens there:
+When the source photo has a fringe (bangs), the swap models only half reproduce it, so it looks see-through on your forehead. The **Fringe** option (`F` key, `--fringe`) can remove it:
 - **Model default** (`blend`): as the model makes it.
 - **Hide** (`hide`): your own forehead and eyebrows are put back over the swapped face with Poisson blending (their texture, the swapped face's colors at the edge), so there is no see-through hair and no seam.
-- **Show** (`show`): the photo's fringe is cut out (with the face parser, `face_parser.onnx`), adjusted to your scene's brightness and color, and placed on your bare forehead *before* the swap, starting at your own hairline (and behind a hat). The swap model then draws it like your own hair: same lighting and sharpness, fully opaque. It keeps the photo's hair color (a black-and-white photo gives a neutral brown).
 
-Cost per face at pixel boost 128 / 256: about +3 / +7 ms for Hide and +9 / +19 ms for Show.
+Hide costs about +3 ms per face at pixel boost 128 (+7 ms at 256).
 
 Landmark smoothing is on by default: the detector's 5 landmarks jitter by a few pixels from frame to frame, which makes the swapped face shimmer. Faces are followed between frames and smoothed with a One Euro filter (strong smoothing while still, almost no lag while moving), which removed about a third of the jitter on test videos without measurable lag.
 

@@ -15,8 +15,6 @@ class FaceParser:
     # 14 neck | 15 neck_l | 16 cloth | 17 hair | 18 hat
     # Only include the face regions that the swap/enhance should affect.
     FACE_CLASSES = (1, 2, 3, 4, 5, 10, 11, 12, 13)
-    HAIR_CLASS = 17
-    HAT_CLASS = 18
 
     def __init__(self, model_path=None, providers=None, on_status=None):
         model_path = model_path or default_model_path("face_parser.onnx")
