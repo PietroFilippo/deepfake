@@ -46,7 +46,7 @@ def parse_args():
                          help="Face detector input size. 320 is ~2.5 ms faster per frame, 640 gives more "
                               "precise landmarks. Default: 640.")
     quality.add_argument("--no-smoothing", action="store_true",
-                         help="Disable landmark smoothing between frames (webcam and video).")
+                         help="Disable landmark smoothing between frames (webcam, videos and GIFs).")
 
     performance = parser.add_argument_group("webcam / performance")
     performance.add_argument("--max-workers", type=int, default=None, help="Maximum number of threads (workers). Fewer = less latency, more = more FPS.")
